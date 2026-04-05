@@ -16,8 +16,10 @@ namespace VividSoul.Editor
         private const string BuildProjectDirectoryName = "VividSoul";
         private const string BuildPlatformDirectoryName = "macOS";
         private const string BuildAppName = "VividSoul.app";
+        private const string MacPluginsDirectoryName = "Plugins";
         private const string SceneDirectory = "Assets/App/Scenes";
         private const string ScenePath = SceneDirectory + "/VividSoul.unity";
+        private const string StandaloneFileBrowserBundleRelativePath = "Assets/ThirdParty/StandaloneFileBrowser/Plugins/StandaloneFileBrowser.bundle";
 
         [InitializeOnLoadMethod]
         private static void InitializeProject()
@@ -58,6 +60,8 @@ namespace VividSoul.Editor
             {
                 throw new InvalidOperationException($"macOS build failed with result: {report.summary.result}");
             }
+
+            CopyRequiredMacPlugins(buildPath);
         }
 
         private static void EnsureBootstrapSceneExists()
@@ -129,6 +133,47 @@ namespace VividSoul.Editor
                     BuildRootDirectoryName,
                     BuildProjectDirectoryName,
                     BuildPlatformDirectoryName));
+        }
+
+        private static void CopyRequiredMacPlugins(string buildPath)
+        {
+            var sourceBundlePath = Path.GetFullPath(
+                Path.Combine(
+                    Application.dataPath,
+                    "..",
+                    StandaloneFileBrowserBundleRelativePath));
+            if (!Directory.Exists(sourceBundlePath))
+            {
+                throw new DirectoryNotFoundException($"Required macOS plugin bundle was not found: {sourceBundlePath}");
+            }
+
+            var pluginsDirectory = Path.Combine(buildPath, "Contents", MacPluginsDirectoryName);
+            Directory.CreateDirectory(pluginsDirectory);
+
+            var targetBundlePath = Path.Combine(pluginsDirectory, Path.GetFileName(sourceBundlePath));
+            if (Directory.Exists(targetBundlePath))
+            {
+                Directory.Delete(targetBundlePath, recursive: true);
+            }
+
+            CopyDirectoryRecursive(sourceBundlePath, targetBundlePath);
+        }
+
+        private static void CopyDirectoryRecursive(string sourceDirectory, string targetDirectory)
+        {
+            Directory.CreateDirectory(targetDirectory);
+
+            foreach (var filePath in Directory.GetFiles(sourceDirectory))
+            {
+                var targetFilePath = Path.Combine(targetDirectory, Path.GetFileName(filePath));
+                File.Copy(filePath, targetFilePath, overwrite: true);
+            }
+
+            foreach (var directoryPath in Directory.GetDirectories(sourceDirectory))
+            {
+                var targetSubdirectoryPath = Path.Combine(targetDirectory, Path.GetFileName(directoryPath));
+                CopyDirectoryRecursive(directoryPath, targetSubdirectoryPath);
+            }
         }
     }
 }
