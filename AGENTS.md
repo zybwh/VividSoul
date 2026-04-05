@@ -4,6 +4,12 @@ This file defines the stable, repository-wide guidance for coding agents working
 It should contain enduring rules and global context only.
 Current progress, active milestones, and recent cleanup status belong in `docs/STATUS.md`, not here.
 
+## Communication and language
+
+- **User-facing:** respond to the user **only in Chinese** (Simplified Chinese unless they specify otherwise).
+- **Reasoning:** internal chain-of-thought may use English.
+- **Do not use Russian** for user-facing replies or for project documentation unless the user explicitly requests it.
+
 ## 1. Repository Shape
 
 - The repository root is the workspace-level coordination layer, not a dumping ground for generated files.
