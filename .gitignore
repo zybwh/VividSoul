@@ -7,7 +7,11 @@ utsuwa/
 Builds/
 downloads/
 tmp/
-Exports/VividSoul/logs/
+# Generated exports (models, VRMA batches, Blender outputs, etc.)
+Exports/
+
+# Unity / editor batch logs (not source)
+VividSoul/*.log
 
 # Unity generated files
 VividSoul/[Ll]ibrary/

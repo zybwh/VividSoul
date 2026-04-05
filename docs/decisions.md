@@ -35,11 +35,11 @@ This file records **durable** choices that should not be re-litigated on every c
 
 ## D-004 — Ignore policy for generated vs curated output
 
-**Context:** Ignoring all of `Exports/` would hide generated VRMA/VRM that people still want to inspect in-editor or commit selectively.
+**Context:** Generated VRMA/VRM, Blender intermediates, and batch logs should not inflate git history or invite accidental commits of multi-hundred-megabyte folders.
 
-**Decision:** Ignore heavy or noisy buckets (`Builds/`, `downloads/`, `tmp/`, `Exports/.../logs/`, Unity `Library/`, etc.) rather than blindly ignoring all exports.
+**Decision:** Ignore the entire `Exports/` tree, plus `VividSoul/*.log` (e.g. `Build_batchmode.log`). Continue ignoring `Builds/`, `downloads/`, `tmp/`, Unity `Library/`, etc.
 
-**Consequences:** If a specific export set must ship in git, prefer a deliberate path under `Exports/` or `VividSoul/Assets/StreamingAssets` and adjust ignore rules explicitly.
+**Consequences:** Tooling still writes to `Exports/<Project>/...` locally. Anything that must ship with the player belongs under `VividSoul/Assets/` (e.g. `StreamingAssets`) or another tracked path—not under `Exports/`.
 
 ## D-005 — Project-local Cursor skills
 
