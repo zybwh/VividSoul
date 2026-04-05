@@ -1,0 +1,16 @@
+{
+  "name": "StandaloneFileBrowser.Samples",
+  "rootNamespace": "",
+  "references": [
+    "StandaloneFileBrowser"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

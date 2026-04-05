@@ -1,0 +1,27 @@
+.DS_Store
+
+# Reference project
+utsuwa/
+
+# Root-level generated and temporary directories
+Builds/
+downloads/
+tmp/
+Exports/VividSoul/logs/
+
+# Unity generated files
+VividSoul/[Ll]ibrary/
+VividSoul/[Tt]emp/
+VividSoul/[Oo]bj/
+VividSoul/[Ll]ogs/
+VividSoul/UserSettings/
+VividSoul/ProfilerCaptures/
+VividSoul/Builds/
+
+# Unity IDE artifacts
+VividSoul/*.csproj
+VividSoul/*.sln
+VividSoul/*.user
+VividSoul/*.pidb
+VividSoul/*.booproj
+VividSoul/*.svd

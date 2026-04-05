@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "name": "Example Desktop Move",
+  "idle": "../Animations/VRMA_MotionPack/VRMA_01.vrma",
+  "click": "../Animations/VRMA_MotionPack/VRMA_02.vrma",
+  "pose": "../Animations/VRMA_MotionPack/VRMA_01.vrma",
+  "movement": {
+    "type": "walk",
+    "start": "",
+    "loop": "../Animations/VRMA_MotionPack/VRMA_WalkInPlace_pose_loop_vroid.vrma",
+    "stop": "",
+    "loopVertical": "../Animations/VRMA_MotionPack/VRMA_WalkDesk_front_vertical_loop_vroid.vrma",
+    "speedMultiplier": 1.0,
+    "faceVelocity": true
+  },
+  "actions": [],
+  "poses": [],
+  "expressions": []
+}
