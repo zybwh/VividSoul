@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using VividSoul.Runtime;
 using VividSoul.Runtime.Avatar;
 using VividSoul.Runtime.Animation;
 using VividSoul.Runtime.Behavior;
@@ -60,6 +61,10 @@ namespace VividSoul.Runtime.App
         private BehaviorPackageInstaller? behaviorPackageInstaller;
         private DesktopPetBoundsService? boundsService;
         private FileSystemContentCatalog? contentCatalog;
+        private ModelFingerprintService? modelFingerprintService;
+        private ModelImportService? modelImportService;
+        private ModelLibraryMigrationService? modelLibraryMigrationService;
+        private ModelLibraryPaths? modelLibraryPaths;
         private IModelLoader? modelLoader;
         private IFileDialogService? fileDialogService;
         private IDesktopPetSettingsStore? settingsStore;
@@ -79,6 +84,7 @@ namespace VividSoul.Runtime.App
         public event Action<ModelLoadResult>? ModelLoaded;
         public event Action? ModelCleared;
         public event Action<string>? ModelLoadFailed;
+        public event Action<string>? BuiltInPoseTriggered;
 
         public ModelLoadResult? CurrentModel { get; private set; }
 
@@ -119,9 +125,13 @@ namespace VividSoul.Runtime.App
             behaviorPackageInstaller = new BehaviorPackageInstaller();
             boundsService = new DesktopPetBoundsService();
             contentCatalog = new FileSystemContentCatalog();
+            modelLibraryPaths = new ModelLibraryPaths();
+            modelFingerprintService = new ModelFingerprintService();
+            modelImportService = new ModelImportService(modelLibraryPaths, contentCatalog, modelFingerprintService);
             modelLoader = new VrmModelLoaderService(characterRuntimeAssembler);
             fileDialogService = new StandaloneFileDialogService();
             settingsStore = new DesktopPetSettingsStore();
+            modelLibraryMigrationService = new ModelLibraryMigrationService(settingsStore, modelLibraryPaths, modelImportService);
             steamPlatformService = new SteamworksNetPlatformService(steamAppId);
             windowService = new UniWindowWindowService(gameObject);
             workshopService = new SteamworksNetWorkshopService(steamPlatformService, contentCatalog);
@@ -137,6 +147,7 @@ namespace VividSoul.Runtime.App
                 await Task.Yield();
                 ApplyWindowSettings();
                 await TryConfigureStartupAnimationPackageAsync();
+                MigrateLegacySelectedLocalModelIfNeeded();
 
                 if (!restoreSelectedModelOnStart)
                 {
@@ -182,7 +193,10 @@ namespace VividSoul.Runtime.App
                     return;
                 }
 
-                await LoadModelFromPathAsync(path, ContentSource.Local, persistSelection: true);
+                await LoadModelFromPathAsync(
+                    ImportLocalModelIntoLibraryIfNeeded(path),
+                    ContentSource.Local,
+                    persistSelection: true);
             }
             catch (Exception exception)
             {
@@ -259,14 +273,7 @@ namespace VividSoul.Runtime.App
             try
             {
                 EnsureServices();
-                var path = Path.GetFullPath(
-                    Path.Combine(Application.streamingAssetsPath, ExampleDesktopMoveBehaviorRelativePath));
-                if (!File.Exists(path))
-                {
-                    throw new FileNotFoundException("Example behavior manifest was not found.", path);
-                }
-
-                await ApplyLocalBehaviorManifestAsync(path);
+                await ApplyLocalBehaviorManifestAsync(GetExampleDesktopMoveBehaviorPath());
             }
             catch (Exception exception)
             {
@@ -323,7 +330,10 @@ namespace VividSoul.Runtime.App
         {
             try
             {
-                await LoadModelFromPathAsync(path, ContentSource.Local, persistSelection: true);
+                await LoadModelFromPathAsync(
+                    ImportLocalModelIntoLibraryIfNeeded(path),
+                    ContentSource.Local,
+                    persistSelection: true);
             }
             catch (Exception exception)
             {
@@ -360,7 +370,8 @@ namespace VividSoul.Runtime.App
         {
             try
             {
-                await LoadModelFromPathAsync(path, InferContentSourceFromPath(path), persistSelection: true);
+                var resolvedPath = ImportLocalModelIntoLibraryIfNeeded(path);
+                await LoadModelFromPathAsync(resolvedPath, InferContentSourceFromPath(resolvedPath), persistSelection: true);
             }
             catch (Exception exception)
             {
@@ -543,12 +554,37 @@ namespace VividSoul.Runtime.App
         {
             try
             {
-                await GetMovementController().MoveToSampledPointAsync();
+                var movementController = GetMovementController();
+                if (!movementController.HasConfiguredMovementAnimation)
+                {
+                    await ApplyLocalBehaviorManifestAsync(GetExampleDesktopMoveBehaviorPath());
+                    movementController = GetMovementController();
+                }
+
+                if (!movementController.HasConfiguredMovementLoopAnimation)
+                {
+                    throw new InvalidOperationException(
+                        "Movement behavior is active, but no loop VRMA was resolved for movement.");
+                }
+
+                await movementController.MoveToSampledPointAsync();
             }
             catch (Exception exception)
             {
                 ReportFailure(exception);
             }
+        }
+
+        private static string GetExampleDesktopMoveBehaviorPath()
+        {
+            var path = Path.GetFullPath(
+                Path.Combine(Application.streamingAssetsPath, ExampleDesktopMoveBehaviorRelativePath));
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException("Example behavior manifest was not found.", path);
+            }
+
+            return path;
         }
 
         [ContextMenu("Clear Selected Model")]
@@ -823,6 +859,9 @@ namespace VividSoul.Runtime.App
             behaviorPackageInstaller ??= new BehaviorPackageInstaller();
             boundsService ??= new DesktopPetBoundsService();
             contentCatalog ??= new FileSystemContentCatalog();
+            modelLibraryPaths ??= new ModelLibraryPaths();
+            modelFingerprintService ??= new ModelFingerprintService();
+            modelImportService ??= new ModelImportService(modelLibraryPaths, contentCatalog, modelFingerprintService);
             modelLoader ??= new VrmModelLoaderService(characterRuntimeAssembler);
             fileDialogService ??= new StandaloneFileDialogService();
             if (settingsStore == null)
@@ -831,6 +870,7 @@ namespace VividSoul.Runtime.App
                 LoadWindowSettings();
             }
 
+            modelLibraryMigrationService ??= new ModelLibraryMigrationService(settingsStore, modelLibraryPaths, modelImportService);
             steamPlatformService ??= new SteamworksNetPlatformService(steamAppId);
             windowService ??= new UniWindowWindowService(gameObject);
             workshopService ??= new SteamworksNetWorkshopService(steamPlatformService, contentCatalog);
@@ -927,7 +967,13 @@ namespace VividSoul.Runtime.App
             var selectedContent = selectedContentStore!.Load();
             if (selectedContent != null && !string.IsNullOrWhiteSpace(selectedContent.Data))
             {
-                var directory = Path.GetDirectoryName(selectedContent.Data);
+                var candidatePath = Path.GetFullPath(selectedContent.Data);
+                if (modelLibraryPaths != null && modelLibraryPaths.ContainsPath(candidatePath))
+                {
+                    return Application.dataPath;
+                }
+
+                var directory = Path.GetDirectoryName(candidatePath);
                 if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
                 {
                     return directory;
@@ -935,6 +981,41 @@ namespace VividSoul.Runtime.App
             }
 
             return Application.dataPath;
+        }
+
+        private void MigrateLegacySelectedLocalModelIfNeeded()
+        {
+            EnsureServices();
+            modelLibraryMigrationService!.MigrateSelectedLocalModelIfNeeded();
+        }
+
+        private string ImportLocalModelIntoLibraryIfNeeded(string path)
+        {
+            EnsureServices();
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("A model path is required.", nameof(path));
+            }
+
+            var normalizedPath = Path.GetFullPath(path);
+            if (!File.Exists(normalizedPath))
+            {
+                throw new FileNotFoundException("The model file does not exist.", normalizedPath);
+            }
+
+            if (!string.Equals(Path.GetExtension(normalizedPath), ".vrm", StringComparison.OrdinalIgnoreCase))
+            {
+                return normalizedPath;
+            }
+
+            if (modelLibraryPaths!.ContainsPath(normalizedPath)
+                || InferContentSourceFromPath(normalizedPath) == ContentSource.BuiltIn)
+            {
+                return normalizedPath;
+            }
+
+            return modelImportService!.Import(normalizedPath).Item.EntryPath;
         }
 
         private async Task TryConfigureStartupAnimationPackageAsync()
@@ -1031,6 +1112,8 @@ namespace VividSoul.Runtime.App
                 throw new FileNotFoundException("The built-in pose file does not exist.", posePath);
             }
 
+            BuiltInPoseTriggered?.Invoke(pose.Id);
+
             var fallbackMotionController = GetFallbackMotionController();
             if (fallbackMotionController != null)
             {
@@ -1103,7 +1186,15 @@ namespace VividSoul.Runtime.App
         private void ReportFailure(Exception exception)
         {
             LastErrorMessage = exception.Message;
-            Debug.LogException(exception);
+            if (exception is UserFacingException)
+            {
+                Debug.LogWarning(exception.Message);
+            }
+            else
+            {
+                Debug.LogException(exception);
+            }
+
             ModelLoadFailed?.Invoke(exception.Message);
         }
 

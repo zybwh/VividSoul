@@ -69,6 +69,18 @@ namespace VividSoul.Runtime.Movement
 
         public string MovementStateSummary => movementStateSummary;
 
+        public bool HasConfiguredMovementAnimation
+            => currentBehaviorPreset != null
+               && (!string.IsNullOrWhiteSpace(currentBehaviorPreset.Movement.StartAnimationPath)
+                   || !string.IsNullOrWhiteSpace(currentBehaviorPreset.Movement.LoopAnimationPath)
+                   || !string.IsNullOrWhiteSpace(currentBehaviorPreset.Movement.LoopVerticalAnimationPath)
+                   || !string.IsNullOrWhiteSpace(currentBehaviorPreset.Movement.StopAnimationPath));
+
+        public bool HasConfiguredMovementLoopAnimation
+            => currentBehaviorPreset != null
+               && (!string.IsNullOrWhiteSpace(currentBehaviorPreset.Movement.LoopAnimationPath)
+                   || !string.IsNullOrWhiteSpace(currentBehaviorPreset.Movement.LoopVerticalAnimationPath));
+
         private void Awake()
         {
             animationController = GetComponent<DesktopPetAnimationController>();
@@ -98,6 +110,12 @@ namespace VividSoul.Runtime.Movement
         {
             currentBehaviorPreset = behaviorPreset ?? throw new ArgumentNullException(nameof(behaviorPreset));
             movementStateSummary = $"Movement preset ready: {currentBehaviorPreset.Movement.Type}";
+            Debug.Log(
+                $"[DesktopPetMovement] behavior={currentBehaviorPreset.Name} type={currentBehaviorPreset.Movement.Type} " +
+                $"start={currentBehaviorPreset.Movement.StartAnimationPath} " +
+                $"loop={currentBehaviorPreset.Movement.LoopAnimationPath} " +
+                $"loopVertical={currentBehaviorPreset.Movement.LoopVerticalAnimationPath} " +
+                $"stop={currentBehaviorPreset.Movement.StopAnimationPath}");
         }
 
         public void ClearBehaviorPreset()
@@ -291,7 +309,6 @@ namespace VividSoul.Runtime.Movement
                 throw new ArgumentNullException(nameof(camera));
             }
 
-            // Screen-space travel (viewport X = right, Y = up) so profile yaw matches what the player sees.
             var startVp = camera.WorldToViewportPoint(startWorld);
             var endVp = camera.WorldToViewportPoint(endWorld);
             var dvx = endVp.x - startVp.x;
@@ -364,6 +381,17 @@ namespace VividSoul.Runtime.Movement
             var playedMovementAnimation = false;
             var hasLoop = !string.IsNullOrWhiteSpace(plan.LoopPath);
 
+            if (!hasLoop)
+            {
+                movementStateSummary = $"Movement loop missing for {movement.Type}.";
+                throw new InvalidOperationException(
+                    $"No movement loop animation is configured for '{movement.Type}'.");
+            }
+
+            Debug.Log(
+                $"[DesktopPetMovement] moveStart type={movement.Type} from={startPosition} to={targetPosition} " +
+                $"yaw={plan.TargetYaw:F1} leanZ={plan.TargetLeanZ:F1} loop={plan.LoopPath}");
+
             await TryPlayStartAnimationAsync(movement, cancellationToken);
 
             var turnTask = SmoothLocalOrientationAsync(
@@ -397,6 +425,7 @@ namespace VividSoul.Runtime.Movement
                 await WaitSecondsAsync(leadInSeconds, cancellationToken);
             }
 
+            Debug.Log($"[DesktopPetMovement] playLoop path={loopPath}");
             await animationController!.PlayLoopPathAsync(loopPath, cancellationToken);
         }
 

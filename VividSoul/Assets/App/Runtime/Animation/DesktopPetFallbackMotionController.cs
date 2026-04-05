@@ -184,6 +184,7 @@ namespace VividSoul.Runtime.Animation
 
         private void HandleModelChanged(GameObject? nextModelRoot)
         {
+            PruneInvalidBoneStates();
             CancelCapture();
             CancelPoseEntryLoad();
             RestoreBasePoseAndOffset();
@@ -225,6 +226,14 @@ namespace VividSoul.Runtime.Animation
 
         private void ApplyDefaultOrFallbackPose()
         {
+            PruneInvalidBoneStates();
+
+            if (boneStates.Count == 0)
+            {
+                hasDefaultPose = false;
+                return;
+            }
+
             var breath = Mathf.Sin(time * chestBreathFrequency * Mathf.PI * 2f) * chestBreathAmplitude;
             var headYaw = Mathf.Sin(time * headYawFrequency * Mathf.PI * 2f) * headYawAmplitude;
             var torsoRoll = Mathf.Sin(time * horizontalSwayFrequency * Mathf.PI * 2f) * horizontalSwayAmplitude * 70f;
@@ -510,6 +519,8 @@ namespace VividSoul.Runtime.Animation
 
         private void CaptureCurrentPoseAsDefault()
         {
+            PruneInvalidBoneStates();
+
             foreach (var boneState in boneStates)
             {
                 boneState.DefaultLocalRotation = boneState.Transform.localRotation;
@@ -552,6 +563,8 @@ namespace VividSoul.Runtime.Animation
 
         private void CaptureCurrentPoseAsTransitionSource()
         {
+            PruneInvalidBoneStates();
+
             foreach (var boneState in boneStates)
             {
                 boneState.TransitionSourceRotation = boneState.Transform.localRotation;
@@ -564,6 +577,8 @@ namespace VividSoul.Runtime.Animation
 
         private void CaptureCurrentPoseAsTransitionTarget()
         {
+            PruneInvalidBoneStates();
+
             foreach (var boneState in boneStates)
             {
                 boneState.TransitionTargetRotation = boneState.Transform.localRotation;
@@ -576,6 +591,8 @@ namespace VividSoul.Runtime.Animation
 
         private void RestoreTransitionSourcePose()
         {
+            PruneInvalidBoneStates();
+
             foreach (var boneState in boneStates)
             {
                 boneState.Transform.localRotation = boneState.TransitionSourceRotation;
@@ -616,6 +633,8 @@ namespace VividSoul.Runtime.Animation
 
         private void ApplyTransitionToPose(float blend)
         {
+            PruneInvalidBoneStates();
+
             foreach (var boneState in boneStates)
             {
                 boneState.Transform.localRotation = Quaternion.Slerp(
@@ -753,6 +772,7 @@ namespace VividSoul.Runtime.Animation
         private void RestoreBasePoseAndOffset()
         {
             RemoveCurrentOffset();
+            PruneInvalidBoneStates();
 
             foreach (var boneState in boneStates)
             {
@@ -774,6 +794,17 @@ namespace VividSoul.Runtime.Animation
             currentOffsetVelocity = Vector3.zero;
             poseEntryTransitionTime = 0f;
             IsActive = false;
+        }
+
+        private void PruneInvalidBoneStates()
+        {
+            for (var index = boneStates.Count - 1; index >= 0; index--)
+            {
+                if (boneStates[index].Transform == null)
+                {
+                    boneStates.RemoveAt(index);
+                }
+            }
         }
 
         private void CancelCapture()

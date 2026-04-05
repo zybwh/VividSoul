@@ -22,10 +22,13 @@ namespace VividSoul.Runtime.App
         private const float SubmenuOpenSettleSeconds = 0.05f;
         private const float ContextMenuLeaveCloseDelaySeconds = 0.2f;
         private const float MenuStayOpenClusterPadding = 32f;
+        private const float StatusMessageDurationSeconds = 3f;
+        private const float StatusMessageBottomOffset = 72f;
         private static readonly Color MenuButtonColor = new(0.10f, 0.18f, 0.26f, 1f);
         private static readonly Color MenuButtonHighlightColor = new(0.21f, 0.33f, 0.47f, 1f);
         private static readonly Color MenuButtonPressedColor = new(0.29f, 0.42f, 0.58f, 1f);
         private static readonly Color MenuButtonDisabledColor = new(0.18f, 0.24f, 0.31f, 1f);
+        private static readonly Color StatusMessageBackgroundColor = new(0.08f, 0.11f, 0.15f, 0.92f);
         private const int RightMouseButton = 1;
 
         private readonly DesktopPetBoundsService boundsService = new();
@@ -36,7 +39,12 @@ namespace VividSoul.Runtime.App
         private int menuSessionId;
         private bool ownsEventSystem;
         private DesktopPetRuntimeController? runtimeController;
+        private DesktopPetSpeechBubblePresenter? speechBubblePresenter;
         private float scheduledSubmenuCloseTime = float.PositiveInfinity;
+        private float statusMessageHideAtTime = float.PositiveInfinity;
+        private CanvasGroup? statusMessageCanvasGroup;
+        private RectTransform? statusMessageRoot;
+        private Text? statusMessageText;
         private float submenuCloseAllowedAtTime = float.PositiveInfinity;
         private float contextMenuLeaveAllowedAtTime = float.PositiveInfinity;
         private float scheduledContextMenuLeaveCloseTime = float.PositiveInfinity;
@@ -46,11 +54,23 @@ namespace VividSoul.Runtime.App
         private void Awake()
         {
             runtimeController = GetComponent<DesktopPetRuntimeController>();
+            speechBubblePresenter = new DesktopPetSpeechBubblePresenter(boundsService);
+        }
+
+        private void OnEnable()
+        {
+            if (runtimeController != null)
+            {
+                runtimeController.ModelLoadFailed += HandleRuntimeFailure;
+                runtimeController.BuiltInPoseTriggered += HandleBuiltInPoseTriggered;
+            }
         }
 
         private void Update()
         {
             HandleContextMenuInput();
+            UpdateStatusMessageVisibility();
+            speechBubblePresenter?.Update(Time.unscaledDeltaTime);
 
             if (runtimeController != null
                 && AreContextMenusVisible()
@@ -73,12 +93,27 @@ namespace VividSoul.Runtime.App
 
         private void OnDisable()
         {
+            if (runtimeController != null)
+            {
+                runtimeController.ModelLoadFailed -= HandleRuntimeFailure;
+                runtimeController.BuiltInPoseTriggered -= HandleBuiltInPoseTriggered;
+            }
+
             CloseContextMenus();
+            HideStatusMessage();
+            speechBubblePresenter?.HideImmediate();
         }
 
         private void OnDestroy()
         {
+            if (runtimeController != null)
+            {
+                runtimeController.ModelLoadFailed -= HandleRuntimeFailure;
+                runtimeController.BuiltInPoseTriggered -= HandleBuiltInPoseTriggered;
+            }
+
             CloseContextMenus();
+            speechBubblePresenter?.HideImmediate();
 
             if (uiCanvas != null)
             {
@@ -89,6 +124,24 @@ namespace VividSoul.Runtime.App
             {
                 Destroy(EventSystem.current.gameObject);
             }
+        }
+
+        private void HandleRuntimeFailure(string message)
+        {
+            ShowStatusMessage(message);
+        }
+
+        private void HandleBuiltInPoseTriggered(string poseId)
+        {
+            if (runtimeController == null
+                || speechBubblePresenter == null
+                || !SpeechBubbleDialogueCatalog.TryGetBuiltInPoseLine(poseId, out var line))
+            {
+                return;
+            }
+
+            EnsureCanvasExists();
+            speechBubblePresenter.Show(uiCanvas!, runtimeController, line);
         }
 
         private void HandleContextMenuInput()
@@ -184,9 +237,13 @@ namespace VividSoul.Runtime.App
             }
 
             ClearChildren(contextMenuUi.ItemList);
+            CreateMenuButton(contextMenuUi.ItemList, "添加角色", closeMenusOnClick: true, onClick: () =>
+            {
+                runtimeController.OpenLocalModelDialog();
+            });
+            CreateSubmenuButton(contextMenuUi.ItemList, "角色库", ContextMenuSubmenu.ReplaceCharacter);
             CreateSubmenuButton(contextMenuUi.ItemList, "姿势选择", ContextMenuSubmenu.PoseSelection);
             CreateDisabledMenuButton(contextMenuUi.ItemList, "更换服装");
-            CreateSubmenuButton(contextMenuUi.ItemList, "替换角色", ContextMenuSubmenu.ReplaceCharacter);
             CreateDisabledMenuButton(contextMenuUi.ItemList, "创意工坊");
             CreateDisabledMenuButton(contextMenuUi.ItemList, "设置");
             CreateMenuButton(contextMenuUi.ItemList, "随机走动", closeMenusOnClick: true, onClick: () =>
@@ -231,7 +288,7 @@ namespace VividSoul.Runtime.App
                     var cachedModels = runtimeController.CachedModels;
                     if (cachedModels.Count == 0)
                     {
-                        CreateDisabledMenuButton(submenuUi.ItemList, "暂无已缓存角色");
+                        CreateDisabledMenuButton(submenuUi.ItemList, "角色库中暂无角色");
                     }
                     else
                     {
@@ -240,11 +297,10 @@ namespace VividSoul.Runtime.App
                             : string.Empty;
                         foreach (var cachedModel in cachedModels)
                         {
-                            var fileName = Path.GetFileName(cachedModel.Path);
                             var isCurrent = string.Equals(cachedModel.Path, currentPath, StringComparison.OrdinalIgnoreCase);
                             var label = isCurrent
-                                ? $"当前: {cachedModel.DisplayName} ({fileName})"
-                                : $"{cachedModel.DisplayName} ({fileName})";
+                                ? $"当前: {cachedModel.DisplayName}"
+                                : cachedModel.DisplayName;
                             CreateMenuButton(submenuUi.ItemList, label, closeMenusOnClick: true, onClick: () =>
                             {
                                 runtimeController.LoadCachedModel(cachedModel.Path);
@@ -440,6 +496,96 @@ namespace VividSoul.Runtime.App
             scaler.referenceResolution = new Vector2(1920f, 1080f);
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
             scaler.matchWidthOrHeight = 0.5f;
+        }
+
+        private void EnsureStatusMessageExists()
+        {
+            EnsureCanvasExists();
+            if (statusMessageRoot != null)
+            {
+                return;
+            }
+
+            var panelObject = new GameObject(
+                "VividSoulStatusMessage",
+                typeof(RectTransform),
+                typeof(Image),
+                typeof(CanvasGroup));
+            statusMessageRoot = panelObject.GetComponent<RectTransform>();
+            statusMessageRoot.SetParent(uiCanvas!.transform, false);
+            statusMessageRoot.anchorMin = new Vector2(0.5f, 0f);
+            statusMessageRoot.anchorMax = new Vector2(0.5f, 0f);
+            statusMessageRoot.pivot = new Vector2(0.5f, 0f);
+            statusMessageRoot.anchoredPosition = new Vector2(0f, StatusMessageBottomOffset);
+            statusMessageRoot.sizeDelta = new Vector2(520f, 64f);
+
+            var background = panelObject.GetComponent<Image>();
+            background.color = StatusMessageBackgroundColor;
+            background.raycastTarget = false;
+
+            statusMessageCanvasGroup = panelObject.GetComponent<CanvasGroup>();
+            statusMessageCanvasGroup.alpha = 0f;
+            statusMessageCanvasGroup.interactable = false;
+            statusMessageCanvasGroup.blocksRaycasts = false;
+
+            var textObject = new GameObject("Label", typeof(RectTransform), typeof(Text));
+            var textRect = textObject.GetComponent<RectTransform>();
+            textRect.SetParent(panelObject.transform, false);
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(18f, 10f);
+            textRect.offsetMax = new Vector2(-18f, -10f);
+
+            statusMessageText = textObject.GetComponent<Text>();
+            statusMessageText.font = GetMenuFont();
+            statusMessageText.fontSize = 18;
+            statusMessageText.alignment = TextAnchor.MiddleCenter;
+            statusMessageText.color = Color.white;
+            statusMessageText.raycastTarget = false;
+            statusMessageText.supportRichText = false;
+            statusMessageText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            statusMessageText.verticalOverflow = VerticalWrapMode.Truncate;
+            statusMessageRoot.gameObject.SetActive(false);
+        }
+
+        private void ShowStatusMessage(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            EnsureStatusMessageExists();
+            statusMessageText!.text = message;
+            statusMessageRoot!.gameObject.SetActive(true);
+            statusMessageRoot.SetAsLastSibling();
+            statusMessageCanvasGroup!.alpha = 1f;
+            statusMessageHideAtTime = Time.unscaledTime + StatusMessageDurationSeconds;
+        }
+
+        private void HideStatusMessage()
+        {
+            statusMessageHideAtTime = float.PositiveInfinity;
+            if (statusMessageRoot == null || statusMessageCanvasGroup == null)
+            {
+                return;
+            }
+
+            statusMessageCanvasGroup.alpha = 0f;
+            statusMessageRoot.gameObject.SetActive(false);
+        }
+
+        private void UpdateStatusMessageVisibility()
+        {
+            if (statusMessageRoot == null || !statusMessageRoot.gameObject.activeSelf)
+            {
+                return;
+            }
+
+            if (Time.unscaledTime >= statusMessageHideAtTime)
+            {
+                HideStatusMessage();
+            }
         }
 
         private void EnsureEventSystemExists()

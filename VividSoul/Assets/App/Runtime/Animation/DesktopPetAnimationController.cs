@@ -290,6 +290,7 @@ namespace VividSoul.Runtime.Animation
 
             var modelInstance = GetCurrentModelInstance();
             var linkedToken = BeginPlaybackLoad(cancellationToken);
+            Debug.Log($"[DesktopPetAnimation] request mode={playbackMode} path={animationPath}");
 
             try
             {
@@ -325,6 +326,9 @@ namespace VividSoul.Runtime.Animation
                     completionSource);
                 returningToIdle = false;
                 UpdateAnimationSummary(animationPath, playbackMode.ToString());
+                Debug.Log(
+                    $"[DesktopPetAnimation] started mode={playbackMode} path={animationPath} " +
+                    $"clip={animation.clip.name} length={animation.clip.length:F3}");
             }
             catch (OperationCanceledException)
             {
@@ -387,6 +391,9 @@ namespace VividSoul.Runtime.Animation
 
         private async void HandleModelLoaded(ModelLoadResult _)
         {
+            CancelPlaybackLoad();
+            ClearCurrentPlaybackSession();
+
             if (!replayIdleOnModelLoad)
             {
                 return;
