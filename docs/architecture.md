@@ -299,7 +299,7 @@
 - 异步：`UniTask`
 - Steam：抽象层先行，初始适配器优先复用宿主工程已存在的 `Steamworks.NET`
 - 文件选择：`StandaloneFileBrowser`
-- 文本 UI：`TextMeshPro`
+- 文本 UI：`TextMeshPro` 优先；运行时高兼容覆盖层可在必要时退回 `UGUI Text`
 - 窗口：`Kirurobo.UniWindowController`
 
 ### 5.2 建议
@@ -520,6 +520,26 @@ MVP 只做消费端：
 - 加载
 
 创作者上传端后置。
+
+### 6.9 `UI`
+
+职责：
+
+- 运行时 HUD
+- 状态提示
+- 对话气泡
+- 后续聊天面板或输入入口
+
+当前已落地的运行时 UI 形态包括：
+
+- `DesktopPetRuntimeHud`
+- `DesktopPetSpeechBubblePresenter`
+
+设计原则：
+
+- 角色对白优先走可复用的运行时覆盖层，而不是把临时文本直接塞进动作或动画模块。
+- 对话气泡作为独立 UI 通道存在，便于后续从“内置动作测试文案”平滑升级到“后端结构化对话响应”。
+- 文本展示层需要优先保证 shipped player 稳定性，必要时可以为了兼容性选择 `UGUI Text` 而不是强依赖运行时动态 TMP 资源。
 
 ## 7. 运行时导入链设计
 

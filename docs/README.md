@@ -11,6 +11,7 @@ Do not keep parallel copies of the same document in the repository root or under
 - `STATUS.md`: current focus, known issues, recent progress, and next steps
 - `bug-lessons.md`: reusable lessons from meaningful bugs and architectural misses
 - `decisions.md`: durable design decisions (repo layout, reference projects, ignore policy)
+- `vrm-model-crafting-guide.md`: VRM model crafting standards distilled from reference model analysis
 
 ## Reading Order
 

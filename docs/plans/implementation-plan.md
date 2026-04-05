@@ -5,6 +5,7 @@
 - 项目：`VividSoul`
 - 宿主工程：`VividSoul`
 - 关联文档：`../architecture.md`、`../prd.md`
+- 专题实施计划：`./model-library-import-plan.md`
 - 版本：`v0.1`
 - 日期：`2026-04-04`
 - 状态：`active`
