@@ -3,9 +3,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using VividSoul.Runtime;
 using VividSoul.Runtime.Interaction;
 
 namespace VividSoul.Runtime.App
@@ -40,6 +42,8 @@ namespace VividSoul.Runtime.App
         private bool ownsEventSystem;
         private DesktopPetRuntimeController? runtimeController;
         private DesktopPetSpeechBubblePresenter? speechBubblePresenter;
+        private DesktopPetChatOverlayPresenter? chatOverlayPresenter;
+        private DesktopPetSettingsWindowPresenter? settingsWindowPresenter;
         private float scheduledSubmenuCloseTime = float.PositiveInfinity;
         private float statusMessageHideAtTime = float.PositiveInfinity;
         private CanvasGroup? statusMessageCanvasGroup;
@@ -50,11 +54,17 @@ namespace VividSoul.Runtime.App
         private float scheduledContextMenuLeaveCloseTime = float.PositiveInfinity;
         private MenuUi? submenuUi;
         private Canvas? uiCanvas;
+        private CancellationTokenSource? chatRequestCancellationTokenSource;
+        private bool isChatRequestPending;
 
         private void Awake()
         {
             runtimeController = GetComponent<DesktopPetRuntimeController>();
             speechBubblePresenter = new DesktopPetSpeechBubblePresenter(boundsService);
+            chatOverlayPresenter = new DesktopPetChatOverlayPresenter(ShowStatusMessage, HandleChatMessageSubmitted);
+            settingsWindowPresenter = new DesktopPetSettingsWindowPresenter(ShowStatusMessage);
+            EnsureCanvasExists();
+            chatOverlayPresenter.Show(uiCanvas!);
         }
 
         private void OnEnable()
@@ -64,6 +74,9 @@ namespace VividSoul.Runtime.App
                 runtimeController.ModelLoadFailed += HandleRuntimeFailure;
                 runtimeController.BuiltInPoseTriggered += HandleBuiltInPoseTriggered;
             }
+
+            EnsureCanvasExists();
+            chatOverlayPresenter?.Show(uiCanvas!);
         }
 
         private void Update()
@@ -71,6 +84,8 @@ namespace VividSoul.Runtime.App
             HandleContextMenuInput();
             UpdateStatusMessageVisibility();
             speechBubblePresenter?.Update(Time.unscaledDeltaTime);
+            chatOverlayPresenter?.Update(Time.unscaledDeltaTime);
+            settingsWindowPresenter?.Update(Time.unscaledDeltaTime);
 
             if (runtimeController != null
                 && AreContextMenusVisible()
@@ -101,7 +116,10 @@ namespace VividSoul.Runtime.App
 
             CloseContextMenus();
             HideStatusMessage();
+            CancelChatRequest();
             speechBubblePresenter?.HideImmediate();
+            chatOverlayPresenter?.Hide();
+            settingsWindowPresenter?.Hide();
         }
 
         private void OnDestroy()
@@ -113,7 +131,10 @@ namespace VividSoul.Runtime.App
             }
 
             CloseContextMenus();
+            CancelChatRequest();
             speechBubblePresenter?.HideImmediate();
+            chatOverlayPresenter?.Hide();
+            settingsWindowPresenter?.Hide();
 
             if (uiCanvas != null)
             {
@@ -147,6 +168,16 @@ namespace VividSoul.Runtime.App
         private void HandleContextMenuInput()
         {
             if (runtimeController == null)
+            {
+                return;
+            }
+
+            if (settingsWindowPresenter != null && settingsWindowPresenter.IsVisible)
+            {
+                return;
+            }
+
+            if (chatOverlayPresenter != null && chatOverlayPresenter.BlocksBackgroundInteraction)
             {
                 return;
             }
@@ -245,7 +276,8 @@ namespace VividSoul.Runtime.App
             CreateSubmenuButton(contextMenuUi.ItemList, "姿势选择", ContextMenuSubmenu.PoseSelection);
             CreateDisabledMenuButton(contextMenuUi.ItemList, "更换服装");
             CreateDisabledMenuButton(contextMenuUi.ItemList, "创意工坊");
-            CreateDisabledMenuButton(contextMenuUi.ItemList, "设置");
+            CreateMenuButton(contextMenuUi.ItemList, "聊天", closeMenusOnClick: true, onClick: OpenChatOverlay);
+            CreateMenuButton(contextMenuUi.ItemList, "设置", closeMenusOnClick: true, onClick: OpenSettingsWindow);
             CreateMenuButton(contextMenuUi.ItemList, "随机走动", closeMenusOnClick: true, onClick: () =>
             {
                 runtimeController.MoveToSampledDesktopLocation();
@@ -561,6 +593,104 @@ namespace VividSoul.Runtime.App
             statusMessageRoot.SetAsLastSibling();
             statusMessageCanvasGroup!.alpha = 1f;
             statusMessageHideAtTime = Time.unscaledTime + StatusMessageDurationSeconds;
+        }
+
+        private void OpenSettingsWindow()
+        {
+            if (settingsWindowPresenter == null || runtimeController == null)
+            {
+                return;
+            }
+
+            EnsureCanvasExists();
+            runtimeController.RequestApplicationFocus();
+            chatOverlayPresenter?.Collapse();
+            settingsWindowPresenter.Show(uiCanvas!);
+        }
+
+        private void OpenChatOverlay()
+        {
+            if (chatOverlayPresenter == null || runtimeController == null)
+            {
+                return;
+            }
+
+            EnsureCanvasExists();
+            runtimeController.RequestApplicationFocus();
+            settingsWindowPresenter?.Hide();
+            chatOverlayPresenter.Show(uiCanvas!);
+            chatOverlayPresenter.Expand();
+        }
+
+        private async void HandleChatMessageSubmitted(string message)
+        {
+            if (chatOverlayPresenter == null || runtimeController == null || string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            if (isChatRequestPending)
+            {
+                chatOverlayPresenter.AppendSystemMessage("上一条消息还在处理中，请等当前回复完成。");
+                return;
+            }
+
+            CancelChatRequest();
+            chatRequestCancellationTokenSource = new CancellationTokenSource();
+            isChatRequestPending = true;
+            chatOverlayPresenter.SetRequestInFlight(true);
+            runtimeController.NotifyConversationActivity();
+            try
+            {
+                var response = await runtimeController.GenerateChatReplyAsync(message, chatRequestCancellationTokenSource.Token);
+                if (string.IsNullOrWhiteSpace(response.DisplayText))
+                {
+                    chatOverlayPresenter.AppendSystemMessage("LLM 返回了空内容。");
+                    return;
+                }
+
+                chatOverlayPresenter.AppendMateMessage(response.DisplayText);
+                runtimeController.NotifyConversationActivity();
+                EnsureCanvasExists();
+                speechBubblePresenter?.Show(uiCanvas!, runtimeController, response.DisplayText);
+            }
+            catch (OperationCanceledException)
+            {
+                chatOverlayPresenter.AppendSystemMessage("当前请求已取消。");
+            }
+            catch (UserFacingException exception)
+            {
+                runtimeController.NotifyConversationActivity(8f);
+                chatOverlayPresenter.AppendSystemMessage(exception.Message);
+                ShowStatusMessage(exception.Message);
+            }
+            catch (Exception exception)
+            {
+                runtimeController.NotifyConversationActivity(8f);
+                chatOverlayPresenter.AppendSystemMessage($"LLM 请求失败：{exception.Message}");
+                ShowStatusMessage($"LLM 请求失败：{exception.Message}");
+            }
+            finally
+            {
+                chatRequestCancellationTokenSource?.Dispose();
+                chatRequestCancellationTokenSource = null;
+                isChatRequestPending = false;
+                chatOverlayPresenter.SetRequestInFlight(false);
+            }
+        }
+
+        private void CancelChatRequest()
+        {
+            if (chatRequestCancellationTokenSource == null)
+            {
+                return;
+            }
+
+            chatRequestCancellationTokenSource.Cancel();
+            chatRequestCancellationTokenSource.Dispose();
+            chatRequestCancellationTokenSource = null;
+            isChatRequestPending = false;
+            chatOverlayPresenter?.SetRequestInFlight(false);
         }
 
         private void HideStatusMessage()

@@ -700,6 +700,7 @@ namespace VividSoul.Runtime.Animation
                 || isReturningToDefaultPose
                 || isWaitingForPosePlayback
                 || runtimeController == null
+                || runtimeController.IsAmbientPoseRotationSuppressed
                 || runtimeController.IsModelInteractionBlocked
                 || boneStates.Count == 0)
             {

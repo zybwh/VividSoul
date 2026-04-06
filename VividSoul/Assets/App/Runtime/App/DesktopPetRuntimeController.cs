@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using VividSoul.Runtime.AI;
 using VividSoul.Runtime;
 using VividSoul.Runtime.Avatar;
 using VividSoul.Runtime.Animation;
@@ -38,6 +39,7 @@ namespace VividSoul.Runtime.App
         private const string StartupAnimationDirectoryEnvironmentVariable = "VIVIDSOUL_LOCAL_VRMA_DIR";
         private const string StartupAnimationFileEnvironmentVariable = "VIVIDSOUL_LOCAL_VRMA_PATH";
         private const string ExampleDesktopMoveBehaviorRelativePath = "Defaults/Behavior/example_desktop_move/behavior.json";
+        private const float ConversationAmbientPoseSuppressionSeconds = 18f;
 
         private static readonly BuiltInPoseOption[] BuiltInPoseOptions =
         {
@@ -73,9 +75,11 @@ namespace VividSoul.Runtime.App
         private IWorkshopService? workshopService;
         private CachedModelStore? cachedModelStore;
         private SelectedContentStore? selectedContentStore;
+        private MateConversationOrchestrator? mateConversationOrchestrator;
         private CancellationTokenSource? loadCancellationTokenSource;
         private GameObject? currentModelRoot;
         private IReadOnlyList<WorkshopContentItem> workshopContent = Array.Empty<WorkshopContentItem>();
+        private float suppressAmbientPoseUntilTime;
         private bool isClickThroughLocked;
         private bool isContextMenuOpen;
         private bool isTopMostEnabled;
@@ -95,6 +99,8 @@ namespace VividSoul.Runtime.App
         public bool IsInteractionDisabled => AllowClickThrough && isClickThroughLocked;
 
         public bool IsModelInteractionBlocked => IsInteractionDisabled || isContextMenuOpen;
+
+        public bool IsAmbientPoseRotationSuppressed => Time.unscaledTime < suppressAmbientPoseUntilTime;
 
         public bool CanUseClickThrough => AllowClickThrough;
 
@@ -137,6 +143,12 @@ namespace VividSoul.Runtime.App
             workshopService = new SteamworksNetWorkshopService(steamPlatformService, contentCatalog);
             cachedModelStore = new CachedModelStore(settingsStore);
             selectedContentStore = new SelectedContentStore(settingsStore);
+            mateConversationOrchestrator = new MateConversationOrchestrator(
+                new AiSettingsStore(),
+                new AiSecretsStore(),
+                new ChatSessionStore(),
+                new LlmUsageStatsStore(),
+                modelFingerprintService);
             LoadWindowSettings();
         }
 
@@ -393,6 +405,33 @@ namespace VividSoul.Runtime.App
         {
             EnsureServices();
             windowService?.RequestApplicationFocus();
+        }
+
+        public Task<LlmResponseEnvelope> GenerateChatReplyAsync(string userMessage, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(userMessage))
+            {
+                throw new ArgumentException("A chat message is required.", nameof(userMessage));
+            }
+
+            EnsureServices();
+            if (CurrentModel == null)
+            {
+                throw new UserFacingException("当前还没有加载角色，暂时无法发起对话。");
+            }
+
+            return mateConversationOrchestrator!.GenerateReplyAsync(
+                CurrentModel.SourcePath,
+                CurrentModel.DisplayName,
+                userMessage,
+                cancellationToken);
+        }
+
+        public void NotifyConversationActivity(float durationSeconds = ConversationAmbientPoseSuppressionSeconds)
+        {
+            suppressAmbientPoseUntilTime = Mathf.Max(
+                suppressAmbientPoseUntilTime,
+                Time.unscaledTime + Mathf.Max(0f, durationSeconds));
         }
 
         public string GetBuiltInPosePath(string poseId)
@@ -876,6 +915,12 @@ namespace VividSoul.Runtime.App
             workshopService ??= new SteamworksNetWorkshopService(steamPlatformService, contentCatalog);
             cachedModelStore ??= new CachedModelStore(settingsStore);
             selectedContentStore ??= new SelectedContentStore(settingsStore);
+            mateConversationOrchestrator ??= new MateConversationOrchestrator(
+                new AiSettingsStore(),
+                new AiSecretsStore(),
+                new ChatSessionStore(),
+                new LlmUsageStatsStore(),
+                modelFingerprintService);
         }
 
         private DesktopPetAnimationController GetAnimationController()

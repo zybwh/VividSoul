@@ -1,6 +1,6 @@
 # VividSoul Status
 
-- Date: `2026-04-05`
+- Date: `2026-04-06`
 - Phase: repository cleanup and Unity-first foundation
 - Core project: `VividSoul`
 - Reference project: `utsuwa` (read-only)
@@ -32,6 +32,23 @@
 - Changed invalid local-import file picks to use a user-facing validation path instead of exception-style failure logging, and added a lightweight in-app HUD status message so wrong file types fail gracefully without polluting the model library.
 - Added a dedicated implementation plan for runtime dialogue bubbles, covering bubble-style UI, typewriter text, adaptive sizing, auto-hide reuse, and the initial 7 built-in action test lines.
 - Implemented the first approved runtime dialogue bubble feature in `DesktopPetRuntimeHud`: built-in poses now trigger reusable speech-bubble playback with typewriter text, adaptive sizing, auto-wrap, timed auto-hide, and a finalized shojo-manga-inspired dialogue bubble style built from `Modern UI Pack` visual resources plus runtime-composed UGUI layers.
+- Added a dedicated `LLM / TTS` integration plan covering provider abstraction, session and memory management, proactive mate messages, `LLM` settings UI, and a staged `TTS` framework rollout without enabling speech playback yet.
+- Implemented the first `LLM settings` runtime skeleton: the right-click `设置` entry now opens a dedicated in-app settings window with a new `LLM` tab, multi-provider profile persistence, separate API key storage, and an overall `LLM` usage statistics panel ready for future provider calls to populate.
+- Refined the new runtime settings window from a fullscreen-feeling overlay into a centered popup-style panel and fixed the `LLM` tab layout so its content area can render the provider fields, prompt settings, and usage stats instead of showing a blank pane.
+- Reworked the `LLM` settings page layout into a more conventional form-based panel: provider editing, global dialogue policy, status hints, and statistics actions now use consistent row heights, label widths, spacing, and footer actions instead of the previous cramped debug-like layout.
+- Added the first runtime chat interaction layer: `DesktopPetRuntimeHud` now keeps a persistent chat launcher and expandable chat panel alive in the main overlay, with message history, input send flow, a new `聊天` context-menu entry, and a temporary local placeholder reply path that also reuses the existing speech bubble channel.
+- Replaced the chat panel's placeholder reply path with the first real `OpenAI-compatible` runtime chain: user sends now resolve the active provider from `LLM` settings, load the provider API key, persist per-character local chat history under `persistentDataPath/ai/sessions/`, record usage stats, and route successful model replies back into both the chat history and the existing speech bubble channel.
+- Split `MiniMax` out into a dedicated runtime provider type instead of treating it as a generic `OpenAI-compatible` profile, and added compatibility normalization so existing MiniMax-looking profiles migrate automatically during settings load while keeping the special reasoning-split request path isolated from other providers.
+- Retuned the runtime dialogue bubble for longer AI replies: the bubble body now allows a much wider text block, uses a larger minimum width for explicit multi-line replies, switches text alignment from centered to upper-left, and slightly loosens spacing so paragraph-style answers do not feel cramped or overly narrow.
+- Added a first dialogue-output formatting layer for AI replies: provider output now gets normalized toward single-paragraph spoken dialogue, strips `<think>` / markdown structure / noisy line breaks, supports a tiny markdown-to-rich-text subset for assistant display only, and augments the runtime system prompt so the model avoids markdown-heavy or list-heavy responses in the first place.
+- Fixed another runtime dialogue bubble sizing issue for wrapped or rich-text replies by making the height estimate account for actual generated line count instead of relying only on the old preferred-height path, reducing bottom clipping when responses become multi-line.
+- Added a conversation-activity suppression window for fallback ambient pose rotation so the background random pose scheduler pauses during live chat and shortly after replies/errors, reducing the chance that idle pose cycling interrupts the visible dialogue.
+- Retuned the runtime dialogue bubble again for wrapped Chinese dialogue: the content inset now reserves a larger rounded-corner safety area, actual rendered multi-line text triggers wider padding automatically, the bubble stroke was softened, very long replies now clamp to a max visible height with internal vertical scrolling that follows the newest revealed text instead of overflowing the screen, and non-scrolling replies now use a vertically centered body layout with preserved top/bottom padding instead of reading like top-pinned debug text.
+- Replaced the runtime dialogue bubble's old `Outline`-style hard border with a layered soft-stroke silhouette built from dedicated background pieces, avoiding the visibly upscaled pixel-edge artifact that appeared on larger bubbles.
+- Added a dedicated implementation plan for a `WS-only` `OpenClaw` gateway provider, covering backend abstraction beyond one-shot HTTP providers, gateway session binding per character, proactive message reception, transcript mirroring, and dedicated settings / diagnostics UI.
+- Replaced the runtime dialogue bubble's remaining body/tail bitmap edge dependency with Unity 6.3 Vector Graphics runtime generation: the main bubble and tail pieces are now built from SVG-derived vector sprites at their actual display size, leaving only the soft shadow as a bitmap layer so enlarged dialogue bubbles no longer inherit the old `Modern UI Pack` pixel fringe.
+- Adjusted the Vector Graphics experiment to rasterize the generated vector bubble pieces into high-resolution runtime textures before assigning them to `uGUI Image`, avoiding the visibility issue from feeding raw vector-built sprites directly into the existing speech-bubble UI while still removing dependence on the old low-resolution border sprites.
+- Replaced the unstable player-side vector sprite path with direct runtime generation of high-resolution anti-aliased rounded-rect / circle mask textures for the speech bubble body and tail, keeping the new non-bitmap-scaling approach while restoring reliable visibility inside the existing `uGUI Image + Mask` pipeline.
 
 ## Known Issues
 
@@ -45,4 +62,7 @@
 - Verify the new export path used by VRMA tooling and batch utilities.
 - Re-test the macOS "添加角色" flow on a non-primary Space to confirm the file dialog no longer opens a frozen duplicate panel.
 - Connect the runtime dialogue bubble channel to future backend-driven dialogue / structured text responses instead of only the current 7 built-in pose test lines.
+- Verify the new runtime chat path against at least one real configured provider and then extend the current recent-turns only session storage toward summary memory and proactive mate messages.
+- Expand the provider layer beyond `OpenAI-compatible` and `MiniMax` only after the new dedicated provider split proves stable in real usage.
+- Decide whether the next AI integration milestone should prioritize the dedicated `OpenClaw` realtime gateway backend over additional direct provider adapters.
 - Continue reducing root-level clutter by keeping all future downloads, exports, and screenshots inside their dedicated directories.
