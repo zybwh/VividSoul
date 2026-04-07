@@ -567,7 +567,9 @@ namespace VividSoul.Runtime.App
                 bubbleUi.TextContentRect.anchorMin = new Vector2(0f, 1f);
                 bubbleUi.TextContentRect.anchorMax = new Vector2(1f, 1f);
                 bubbleUi.TextContentRect.pivot = new Vector2(0.5f, 1f);
-                bubbleUi.TextContentRect.offsetMin = new Vector2(textPaddingLeft, -(preferredSize.y + textPaddingTop));
+                bubbleUi.TextContentRect.offsetMin = new Vector2(
+                    textPaddingLeft,
+                    -(preferredSize.y + textPaddingTop + textPaddingBottom));
                 bubbleUi.TextContentRect.offsetMax = new Vector2(-textPaddingRight, -textPaddingTop);
             }
             else
@@ -587,7 +589,7 @@ namespace VividSoul.Runtime.App
             bubbleUi.ScrollRect.vertical = bubbleRequiresVerticalScroll;
             bubbleUi.CanvasGroup.interactable = bubbleRequiresVerticalScroll;
             bubbleUi.CanvasGroup.blocksRaycasts = bubbleRequiresVerticalScroll;
-            ApplyScrollPosition(bubbleRequiresVerticalScroll ? 0f : 1f);
+            ApplyScrollPosition(1f);
         }
 
         private (Vector2 Size, int LineCount) GetPreferredTextMetrics(string text)
@@ -660,7 +662,7 @@ namespace VividSoul.Runtime.App
                 : currentMessage.Substring(0, visibleCharacters);
             if (!string.Equals(bubbleUi!.Text.text, nextVisibleText, StringComparison.Ordinal))
             {
-                UpdateVisibleText(nextVisibleText, bubbleRequiresVerticalScroll);
+                UpdateVisibleText(nextVisibleText, false);
             }
 
             if (visibleCharacters < totalCharacterCount)
@@ -752,7 +754,7 @@ namespace VividSoul.Runtime.App
             var contentTop = -bubbleUi.TextContentRect.offsetMax.y;
             bubbleUi.TextContentRect.offsetMin = new Vector2(
                 bubbleUi.TextContentRect.offsetMin.x,
-                -(contentHeight + contentTop));
+                -(contentHeight + contentTop + BubbleTextPaddingBottom));
 
             ApplyScrollPosition(stickToBottom ? 0f : 1f);
         }
