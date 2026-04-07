@@ -129,6 +129,7 @@ namespace VividSoul.Editor
         {
             Vrm10AnimationInstance? animationInstance = null;
             ITimeControl? timeControl = null;
+            var basePose = IdlePoseSample.FromBoneMap(CreateBoneMap(sourceModel));
 
             try
             {
@@ -150,7 +151,9 @@ namespace VividSoul.Editor
                 sourceModel.Runtime.VrmAnimation = animationInstance;
                 sourceModel.Runtime.Process();
 
-                return IdlePoseSample.FromBoneMap(CreateBoneMap(sourceModel));
+                return IdlePoseSample
+                    .FromBoneMap(CreateBoneMap(sourceModel))
+                    .MergeWithBaseLowerBody(basePose);
             }
             finally
             {
@@ -559,6 +562,60 @@ namespace VividSoul.Editor
             }
         }
 
+        private static bool ShouldKeepSampledDefaultPose(HumanBodyBones bone)
+        {
+            return bone switch
+            {
+                HumanBodyBones.Spine => true,
+                HumanBodyBones.Chest => true,
+                HumanBodyBones.UpperChest => true,
+                HumanBodyBones.Neck => true,
+                HumanBodyBones.Head => true,
+                HumanBodyBones.LeftEye => true,
+                HumanBodyBones.RightEye => true,
+                HumanBodyBones.Jaw => true,
+                HumanBodyBones.LeftShoulder => true,
+                HumanBodyBones.RightShoulder => true,
+                HumanBodyBones.LeftUpperArm => true,
+                HumanBodyBones.RightUpperArm => true,
+                HumanBodyBones.LeftLowerArm => true,
+                HumanBodyBones.RightLowerArm => true,
+                HumanBodyBones.LeftHand => true,
+                HumanBodyBones.RightHand => true,
+                HumanBodyBones.LeftThumbProximal => true,
+                HumanBodyBones.LeftThumbIntermediate => true,
+                HumanBodyBones.LeftThumbDistal => true,
+                HumanBodyBones.LeftIndexProximal => true,
+                HumanBodyBones.LeftIndexIntermediate => true,
+                HumanBodyBones.LeftIndexDistal => true,
+                HumanBodyBones.LeftMiddleProximal => true,
+                HumanBodyBones.LeftMiddleIntermediate => true,
+                HumanBodyBones.LeftMiddleDistal => true,
+                HumanBodyBones.LeftRingProximal => true,
+                HumanBodyBones.LeftRingIntermediate => true,
+                HumanBodyBones.LeftRingDistal => true,
+                HumanBodyBones.LeftLittleProximal => true,
+                HumanBodyBones.LeftLittleIntermediate => true,
+                HumanBodyBones.LeftLittleDistal => true,
+                HumanBodyBones.RightThumbProximal => true,
+                HumanBodyBones.RightThumbIntermediate => true,
+                HumanBodyBones.RightThumbDistal => true,
+                HumanBodyBones.RightIndexProximal => true,
+                HumanBodyBones.RightIndexIntermediate => true,
+                HumanBodyBones.RightIndexDistal => true,
+                HumanBodyBones.RightMiddleProximal => true,
+                HumanBodyBones.RightMiddleIntermediate => true,
+                HumanBodyBones.RightMiddleDistal => true,
+                HumanBodyBones.RightRingProximal => true,
+                HumanBodyBones.RightRingIntermediate => true,
+                HumanBodyBones.RightRingDistal => true,
+                HumanBodyBones.RightLittleProximal => true,
+                HumanBodyBones.RightLittleIntermediate => true,
+                HumanBodyBones.RightLittleDistal => true,
+                _ => false,
+            };
+        }
+
         private sealed record IdleProfile(
             float DefaultPoseSampleNormalizedTime,
             float HorizontalSwayAmplitude,
@@ -589,6 +646,37 @@ namespace VividSoul.Editor
                 }
 
                 return sample;
+            }
+
+            public IdlePoseSample MergeWithBaseLowerBody(IdlePoseSample basePose)
+            {
+                if (basePose == null)
+                {
+                    throw new ArgumentNullException(nameof(basePose));
+                }
+
+                var merged = new IdlePoseSample();
+                foreach (var entry in Bones)
+                {
+                    if (!ShouldKeepSampledDefaultPose(entry.Key)
+                        && basePose.Bones.TryGetValue(entry.Key, out var baseBonePose))
+                    {
+                        merged.Bones[entry.Key] = baseBonePose;
+                        continue;
+                    }
+
+                    merged.Bones[entry.Key] = entry.Value;
+                }
+
+                foreach (var entry in basePose.Bones)
+                {
+                    if (!merged.Bones.ContainsKey(entry.Key))
+                    {
+                        merged.Bones[entry.Key] = entry.Value;
+                    }
+                }
+
+                return merged;
             }
         }
 

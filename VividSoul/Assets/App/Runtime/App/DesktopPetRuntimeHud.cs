@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -8,6 +9,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using VividSoul.Runtime;
+using VividSoul.Runtime.AI;
 using VividSoul.Runtime.Interaction;
 
 namespace VividSoul.Runtime.App
@@ -24,12 +26,20 @@ namespace VividSoul.Runtime.App
         private const float SubmenuOpenSettleSeconds = 0.05f;
         private const float ContextMenuLeaveCloseDelaySeconds = 0.2f;
         private const float MenuStayOpenClusterPadding = 32f;
+        private const float SubmenuMaxViewportHeight = 520f;
+        private const float MinimumScrollableViewportHeight = 120f;
+        private const float ScrollViewportScreenMargin = 24f;
+        private const float MenuScrollSensitivity = 36f;
+        private const float MenuScrollbarWidth = 10f;
+        private const float MenuScrollbarInset = 6f;
         private const float StatusMessageDurationSeconds = 3f;
         private const float StatusMessageBottomOffset = 72f;
         private static readonly Color MenuButtonColor = new(0.10f, 0.18f, 0.26f, 1f);
         private static readonly Color MenuButtonHighlightColor = new(0.21f, 0.33f, 0.47f, 1f);
         private static readonly Color MenuButtonPressedColor = new(0.29f, 0.42f, 0.58f, 1f);
         private static readonly Color MenuButtonDisabledColor = new(0.18f, 0.24f, 0.31f, 1f);
+        private static readonly Color MenuScrollbarTrackColor = new(0.05f, 0.08f, 0.11f, 0.70f);
+        private static readonly Color MenuScrollbarHandleColor = new(0.54f, 0.68f, 0.82f, 0.95f);
         private static readonly Color StatusMessageBackgroundColor = new(0.08f, 0.11f, 0.15f, 0.92f);
         private const int RightMouseButton = 1;
 
@@ -56,13 +66,17 @@ namespace VividSoul.Runtime.App
         private Canvas? uiCanvas;
         private CancellationTokenSource? chatRequestCancellationTokenSource;
         private bool isChatRequestPending;
+        private readonly ConcurrentQueue<Action> pendingConversationUiActions = new();
 
         private void Awake()
         {
             runtimeController = GetComponent<DesktopPetRuntimeController>();
             speechBubblePresenter = new DesktopPetSpeechBubblePresenter(boundsService);
-            chatOverlayPresenter = new DesktopPetChatOverlayPresenter(ShowStatusMessage, HandleChatMessageSubmitted);
-            settingsWindowPresenter = new DesktopPetSettingsWindowPresenter(ShowStatusMessage);
+            chatOverlayPresenter = new DesktopPetChatOverlayPresenter(
+                ShowStatusMessage,
+                HandleChatMessageSubmitted,
+                () => runtimeController?.MarkConversationMessagesRead());
+            settingsWindowPresenter = new DesktopPetSettingsWindowPresenter(runtimeController!, ShowStatusMessage);
             EnsureCanvasExists();
             chatOverlayPresenter.Show(uiCanvas!);
         }
@@ -73,6 +87,8 @@ namespace VividSoul.Runtime.App
             {
                 runtimeController.ModelLoadFailed += HandleRuntimeFailure;
                 runtimeController.BuiltInPoseTriggered += HandleBuiltInPoseTriggered;
+                runtimeController.ConversationMessageReceived += HandleConversationMessageReceived;
+                runtimeController.ConversationStatusChanged += HandleConversationStatusChanged;
             }
 
             EnsureCanvasExists();
@@ -86,6 +102,7 @@ namespace VividSoul.Runtime.App
             speechBubblePresenter?.Update(Time.unscaledDeltaTime);
             chatOverlayPresenter?.Update(Time.unscaledDeltaTime);
             settingsWindowPresenter?.Update(Time.unscaledDeltaTime);
+            DrainPendingConversationUiActions();
 
             if (runtimeController != null
                 && AreContextMenusVisible()
@@ -112,6 +129,8 @@ namespace VividSoul.Runtime.App
             {
                 runtimeController.ModelLoadFailed -= HandleRuntimeFailure;
                 runtimeController.BuiltInPoseTriggered -= HandleBuiltInPoseTriggered;
+                runtimeController.ConversationMessageReceived -= HandleConversationMessageReceived;
+                runtimeController.ConversationStatusChanged -= HandleConversationStatusChanged;
             }
 
             CloseContextMenus();
@@ -128,6 +147,8 @@ namespace VividSoul.Runtime.App
             {
                 runtimeController.ModelLoadFailed -= HandleRuntimeFailure;
                 runtimeController.BuiltInPoseTriggered -= HandleBuiltInPoseTriggered;
+                runtimeController.ConversationMessageReceived -= HandleConversationMessageReceived;
+                runtimeController.ConversationStatusChanged -= HandleConversationStatusChanged;
             }
 
             CloseContextMenus();
@@ -135,6 +156,7 @@ namespace VividSoul.Runtime.App
             speechBubblePresenter?.HideImmediate();
             chatOverlayPresenter?.Hide();
             settingsWindowPresenter?.Hide();
+            settingsWindowPresenter?.Dispose();
 
             if (uiCanvas != null)
             {
@@ -451,6 +473,7 @@ namespace VividSoul.Runtime.App
             text.supportRichText = false;
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Truncate;
+            TryAttachScrollRelay(parent, rowObject);
             return new MenuRow(rectTransform, background);
         }
 
@@ -460,11 +483,11 @@ namespace VividSoul.Runtime.App
 
             var canvasTransform = uiCanvas!.transform;
             contextMenuUi ??= CreateMainMenuUi(canvasTransform, "VividSoulContextMenu");
-            submenuUi ??= CreateMainMenuUi(canvasTransform, "VividSoulContextSubmenu");
+            submenuUi ??= CreateMainMenuUi(canvasTransform, "VividSoulContextSubmenu", enableVerticalScroll: true);
             submenuUi.SetVisible(false);
         }
 
-        private MenuUi CreateMainMenuUi(Transform parent, string objectName)
+        private MenuUi CreateMainMenuUi(Transform parent, string objectName, bool enableVerticalScroll = false)
         {
             var menuObject = InstantiateRequiredPrefab(ContextMenuPrefabPath, parent);
             menuObject.name = objectName;
@@ -500,6 +523,11 @@ namespace VividSoul.Runtime.App
             canvasGroup.interactable = true;
             canvasGroup.blocksRaycasts = true;
             var menuUi = new MenuUi(root, contentRoot, itemList, canvasGroup);
+            if (enableVerticalScroll)
+            {
+                ConfigureScrollableMenu(menuObject, menuUi);
+            }
+
             EnsureMenuBackgroundVisible(menuUi);
             return menuUi;
         }
@@ -620,6 +648,8 @@ namespace VividSoul.Runtime.App
             settingsWindowPresenter?.Hide();
             chatOverlayPresenter.Show(uiCanvas!);
             chatOverlayPresenter.Expand();
+            runtimeController.MarkConversationMessagesRead();
+            _ = runtimeController.RefreshConversationBackendAsync();
         }
 
         private async void HandleChatMessageSubmitted(string message)
@@ -642,17 +672,7 @@ namespace VividSoul.Runtime.App
             runtimeController.NotifyConversationActivity();
             try
             {
-                var response = await runtimeController.GenerateChatReplyAsync(message, chatRequestCancellationTokenSource.Token);
-                if (string.IsNullOrWhiteSpace(response.DisplayText))
-                {
-                    chatOverlayPresenter.AppendSystemMessage("LLM 返回了空内容。");
-                    return;
-                }
-
-                chatOverlayPresenter.AppendMateMessage(response.DisplayText);
-                runtimeController.NotifyConversationActivity();
-                EnsureCanvasExists();
-                speechBubblePresenter?.Show(uiCanvas!, runtimeController, response.DisplayText);
+                await runtimeController.SendChatMessageAsync(message, chatRequestCancellationTokenSource.Token);
             }
             catch (OperationCanceledException)
             {
@@ -691,6 +711,59 @@ namespace VividSoul.Runtime.App
             chatRequestCancellationTokenSource = null;
             isChatRequestPending = false;
             chatOverlayPresenter?.SetRequestInFlight(false);
+        }
+
+        private void HandleConversationMessageReceived(ConversationMessageEnvelope envelope)
+        {
+            pendingConversationUiActions.Enqueue(() =>
+            {
+                if (chatOverlayPresenter == null || runtimeController == null)
+                {
+                    return;
+                }
+
+                switch (envelope.Message.Role)
+                {
+                    case ChatRole.User:
+                        chatOverlayPresenter.AppendUserMessage(envelope.Message.Text);
+                        break;
+                    case ChatRole.Assistant:
+                        chatOverlayPresenter.AppendMateMessage(envelope.Message.Text);
+                        runtimeController.NotifyConversationActivity();
+                        if (envelope.ShouldDisplayBubble)
+                        {
+                            EnsureCanvasExists();
+                            speechBubblePresenter?.Show(uiCanvas!, runtimeController, envelope.Message.Text);
+                        }
+
+                        if (chatOverlayPresenter.IsExpanded)
+                        {
+                            runtimeController.MarkConversationMessagesRead();
+                        }
+
+                        break;
+                    case ChatRole.System:
+                        chatOverlayPresenter.AppendSystemMessage(envelope.Message.Text);
+                        break;
+                }
+            });
+        }
+
+        private void HandleConversationStatusChanged(ConversationStatusSnapshot status)
+        {
+            pendingConversationUiActions.Enqueue(() =>
+            {
+                chatOverlayPresenter?.SetRequestInFlight(status.IsRequestInFlight);
+                chatOverlayPresenter?.SetConversationStatus(status);
+            });
+        }
+
+        private void DrainPendingConversationUiActions()
+        {
+            while (pendingConversationUiActions.TryDequeue(out var action))
+            {
+                action();
+            }
         }
 
         private void HideStatusMessage()
@@ -1012,12 +1085,32 @@ namespace VividSoul.Runtime.App
             AddEventTriggerAction(target, EventTriggerType.PointerClick, action);
         }
 
+        private static void AddScrollAction(GameObject target, Action<PointerEventData> action)
+        {
+            AddEventTriggerAction(target, EventTriggerType.Scroll, eventData =>
+            {
+                if (eventData is PointerEventData pointerEventData)
+                {
+                    action(pointerEventData);
+                }
+            });
+        }
+
         private static void AddEventTriggerAction(GameObject target, EventTriggerType eventType, Action action)
         {
             var eventTrigger = target.GetComponent<EventTrigger>() ?? target.AddComponent<EventTrigger>();
             eventTrigger.triggers ??= new List<EventTrigger.Entry>();
             var entry = new EventTrigger.Entry { eventID = eventType };
             entry.callback.AddListener(_ => action());
+            eventTrigger.triggers.Add(entry);
+        }
+
+        private static void AddEventTriggerAction(GameObject target, EventTriggerType eventType, Action<BaseEventData> action)
+        {
+            var eventTrigger = target.GetComponent<EventTrigger>() ?? target.AddComponent<EventTrigger>();
+            eventTrigger.triggers ??= new List<EventTrigger.Entry>();
+            var entry = new EventTrigger.Entry { eventID = eventType };
+            entry.callback.AddListener(action.Invoke);
             eventTrigger.triggers.Add(entry);
         }
 
@@ -1030,6 +1123,7 @@ namespace VividSoul.Runtime.App
         {
             Canvas.ForceUpdateCanvases();
             LayoutRebuilder.ForceRebuildLayoutImmediate(menu.ItemList);
+            UpdateMenuScrollLayout(menu);
             RefreshContentSizeFitter(menu.Content);
             LayoutRebuilder.ForceRebuildLayoutImmediate(menu.Content);
             Canvas.ForceUpdateCanvases();
@@ -1048,6 +1142,141 @@ namespace VividSoul.Runtime.App
                 fitter.enabled = false;
                 fitter.enabled = true;
             }
+        }
+
+        private static void ConfigureScrollableMenu(GameObject menuObject, MenuUi menu)
+        {
+            var viewportObject = new GameObject(
+                "Scroll Viewport",
+                typeof(RectTransform),
+                typeof(Image),
+                typeof(RectMask2D),
+                typeof(LayoutElement));
+            var viewport = viewportObject.GetComponent<RectTransform>();
+            var siblingIndex = menu.ItemList.GetSiblingIndex();
+            viewport.SetParent(menu.Content, false);
+            viewport.SetSiblingIndex(siblingIndex);
+            viewport.anchorMin = new Vector2(0f, 1f);
+            viewport.anchorMax = new Vector2(1f, 1f);
+            viewport.pivot = new Vector2(0.5f, 1f);
+            viewport.sizeDelta = Vector2.zero;
+
+            var viewportImage = viewportObject.GetComponent<Image>();
+            viewportImage.color = new Color(1f, 1f, 1f, 0.001f);
+            viewportImage.raycastTarget = true;
+
+            var viewportLayout = viewportObject.GetComponent<LayoutElement>();
+            viewportLayout.minHeight = MinimumScrollableViewportHeight;
+            viewportLayout.preferredHeight = MinimumScrollableViewportHeight;
+            viewportLayout.flexibleWidth = 1f;
+
+            menu.ItemList.SetParent(viewport, false);
+            menu.ItemList.anchorMin = new Vector2(0f, 1f);
+            menu.ItemList.anchorMax = new Vector2(1f, 1f);
+            menu.ItemList.pivot = new Vector2(0.5f, 1f);
+            menu.ItemList.anchoredPosition = Vector2.zero;
+            menu.ItemList.sizeDelta = new Vector2(0f, menu.ItemList.sizeDelta.y);
+
+            var scrollbar = CreateMenuScrollbar(viewport);
+            var scrollRect = menuObject.AddComponent<ScrollRect>();
+            scrollRect.viewport = viewport;
+            scrollRect.content = menu.ItemList;
+            scrollRect.horizontal = false;
+            scrollRect.vertical = false;
+            scrollRect.movementType = ScrollRect.MovementType.Clamped;
+            scrollRect.inertia = true;
+            scrollRect.scrollSensitivity = MenuScrollSensitivity;
+            scrollRect.verticalScrollbar = scrollbar;
+            scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.Permanent;
+
+            AddScrollAction(viewportObject, menu.HandleScroll);
+            menu.AttachScroll(scrollRect, viewport, viewportLayout, scrollbar);
+        }
+
+        private static Scrollbar CreateMenuScrollbar(RectTransform parent)
+        {
+            var scrollbarObject = new GameObject(
+                "Scrollbar",
+                typeof(RectTransform),
+                typeof(Image),
+                typeof(Scrollbar));
+            var scrollbarRect = scrollbarObject.GetComponent<RectTransform>();
+            scrollbarRect.SetParent(parent, false);
+            scrollbarRect.anchorMin = new Vector2(1f, 0f);
+            scrollbarRect.anchorMax = new Vector2(1f, 1f);
+            scrollbarRect.pivot = new Vector2(1f, 1f);
+            scrollbarRect.offsetMin = new Vector2(-MenuScrollbarInset - MenuScrollbarWidth, MenuScrollbarInset);
+            scrollbarRect.offsetMax = new Vector2(-MenuScrollbarInset, -MenuScrollbarInset);
+
+            var trackImage = scrollbarObject.GetComponent<Image>();
+            trackImage.color = MenuScrollbarTrackColor;
+            trackImage.raycastTarget = true;
+
+            var slidingAreaObject = new GameObject("Sliding Area", typeof(RectTransform));
+            var slidingArea = slidingAreaObject.GetComponent<RectTransform>();
+            slidingArea.SetParent(scrollbarRect, false);
+            slidingArea.anchorMin = Vector2.zero;
+            slidingArea.anchorMax = Vector2.one;
+            slidingArea.offsetMin = new Vector2(1f, 1f);
+            slidingArea.offsetMax = new Vector2(-1f, -1f);
+
+            var handleObject = new GameObject(
+                "Handle",
+                typeof(RectTransform),
+                typeof(Image));
+            var handleRect = handleObject.GetComponent<RectTransform>();
+            handleRect.SetParent(slidingArea, false);
+            handleRect.anchorMin = Vector2.zero;
+            handleRect.anchorMax = Vector2.one;
+            handleRect.offsetMin = Vector2.zero;
+            handleRect.offsetMax = Vector2.zero;
+
+            var handleImage = handleObject.GetComponent<Image>();
+            handleImage.color = MenuScrollbarHandleColor;
+            handleImage.raycastTarget = true;
+
+            var scrollbar = scrollbarObject.GetComponent<Scrollbar>();
+            scrollbar.targetGraphic = handleImage;
+            scrollbar.handleRect = handleRect;
+            scrollbar.direction = Scrollbar.Direction.BottomToTop;
+            scrollbar.navigation = new Navigation { mode = Navigation.Mode.None };
+            scrollbar.transition = Selectable.Transition.ColorTint;
+            scrollbar.colors = ColorBlock.defaultColorBlock;
+            scrollbar.value = 1f;
+            return scrollbar;
+        }
+
+        private static void UpdateMenuScrollLayout(MenuUi menu)
+        {
+            if (!menu.HasScrollSupport)
+            {
+                return;
+            }
+
+            Canvas.ForceUpdateCanvases();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(menu.ItemList);
+            var preferredHeight = LayoutUtility.GetPreferredHeight(menu.ItemList);
+            if (float.IsNaN(preferredHeight) || preferredHeight < 1f)
+            {
+                preferredHeight = menu.ItemList.rect.height;
+            }
+
+            preferredHeight = Mathf.Max(1f, preferredHeight);
+            var maxViewportHeight = GetScrollableViewportHeightCap();
+            var viewportHeight = Mathf.Min(preferredHeight, maxViewportHeight);
+            menu.SetScrollViewportHeight(viewportHeight);
+            menu.ItemList.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, preferredHeight);
+            menu.SetScrollEnabled(preferredHeight > maxViewportHeight + 0.5f);
+            LayoutRebuilder.ForceRebuildLayoutImmediate(menu.VisibleContentRoot);
+            Canvas.ForceUpdateCanvases();
+        }
+
+        private static float GetScrollableViewportHeightCap()
+        {
+            var screenLimitedHeight = Screen.height - (ContextMenuGap * 2f) - ScrollViewportScreenMargin;
+            return Mathf.Max(
+                MinimumScrollableViewportHeight,
+                Mathf.Min(SubmenuMaxViewportHeight, screenLimitedHeight));
         }
 
         private static void SyncMenuRootSizeFromContent(MenuUi menu)
@@ -1200,7 +1429,7 @@ namespace VividSoul.Runtime.App
         private static Rect GetMenuInteractiveRect(MenuUi menu, float padding)
         {
             var rootRect = GetScreenRect(menu.Root);
-            var itemListRect = GetScreenRect(menu.ItemList);
+            var itemListRect = GetScreenRect(menu.VisibleContentRoot);
             var unionRect = Rect.MinMaxRect(
                 Mathf.Min(rootRect.xMin, itemListRect.xMin) - padding,
                 Mathf.Min(rootRect.yMin, itemListRect.yMin) - padding,
@@ -1214,6 +1443,32 @@ namespace VividSoul.Runtime.App
             var corners = new Vector3[4];
             rectTransform.GetWorldCorners(corners);
             return Rect.MinMaxRect(corners[0].x, corners[0].y, corners[2].x, corners[2].y);
+        }
+
+        private void TryAttachScrollRelay(RectTransform parent, GameObject rowObject)
+        {
+            var menu = ResolveMenuUiByItemList(parent);
+            if (menu == null || !menu.HasScrollSupport)
+            {
+                return;
+            }
+
+            AddScrollAction(rowObject, menu.HandleScroll);
+        }
+
+        private MenuUi? ResolveMenuUiByItemList(RectTransform itemList)
+        {
+            if (submenuUi != null && submenuUi.ItemList == itemList)
+            {
+                return submenuUi;
+            }
+
+            if (contextMenuUi != null && contextMenuUi.ItemList == itemList)
+            {
+                return contextMenuUi;
+            }
+
+            return null;
         }
 
         private static string FormatRect(Rect rect)
@@ -1300,7 +1555,19 @@ namespace VividSoul.Runtime.App
 
             public RectTransform ItemList { get; }
 
+            public RectTransform VisibleContentRoot => ScrollViewport != null ? ScrollViewport : ItemList;
+
+            public bool HasScrollSupport => ScrollRect != null && ScrollViewport != null && ScrollViewportLayout != null;
+
             private CanvasGroup CanvasGroup { get; }
+
+            private ScrollRect? ScrollRect { get; set; }
+
+            private RectTransform? ScrollViewport { get; set; }
+
+            private LayoutElement? ScrollViewportLayout { get; set; }
+
+            private Scrollbar? Scrollbar { get; set; }
 
             public void SetVisible(bool isVisible)
             {
@@ -1313,6 +1580,58 @@ namespace VividSoul.Runtime.App
                 CanvasGroup.alpha = isVisible ? 1f : 0f;
                 CanvasGroup.interactable = isVisible;
                 CanvasGroup.blocksRaycasts = isVisible;
+            }
+
+            public void AttachScroll(ScrollRect scrollRect, RectTransform scrollViewport, LayoutElement scrollViewportLayout, Scrollbar scrollbar)
+            {
+                ScrollRect = scrollRect;
+                ScrollViewport = scrollViewport;
+                ScrollViewportLayout = scrollViewportLayout;
+                Scrollbar = scrollbar;
+            }
+
+            public void SetScrollViewportHeight(float height)
+            {
+                if (ScrollViewport == null || ScrollViewportLayout == null)
+                {
+                    return;
+                }
+
+                var clampedHeight = Mathf.Max(1f, height);
+                ScrollViewportLayout.minHeight = clampedHeight;
+                ScrollViewportLayout.preferredHeight = clampedHeight;
+                ScrollViewport.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, clampedHeight);
+            }
+
+            public void SetScrollEnabled(bool isEnabled)
+            {
+                if (ScrollRect == null)
+                {
+                    return;
+                }
+
+                ScrollRect.enabled = isEnabled;
+                ScrollRect.vertical = isEnabled;
+                ScrollRect.verticalNormalizedPosition = 1f;
+                if (Scrollbar != null)
+                {
+                    Scrollbar.gameObject.SetActive(isEnabled);
+                }
+
+                if (!isEnabled)
+                {
+                    ItemList.anchoredPosition = Vector2.zero;
+                }
+            }
+
+            public void HandleScroll(PointerEventData eventData)
+            {
+                if (ScrollRect == null || !ScrollRect.enabled || !ScrollRect.vertical)
+                {
+                    return;
+                }
+
+                ScrollRect.OnScroll(eventData);
             }
         }
 

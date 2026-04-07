@@ -138,6 +138,11 @@ namespace VividSoul.Runtime.AI
                 : profile.DisplayName.Trim();
             var normalizedBaseUrl = profile.BaseUrl?.Trim() ?? string.Empty;
             var normalizedModel = profile.Model?.Trim() ?? string.Empty;
+            var normalizedOpenClawGatewayWsUrl = profile.OpenClawGatewayWsUrl?.Trim() ?? string.Empty;
+            var normalizedOpenClawAgentId = string.IsNullOrWhiteSpace(profile.OpenClawAgentId)
+                ? "main"
+                : profile.OpenClawAgentId.Trim();
+            var normalizedOpenClawSessionKeyTemplate = profile.OpenClawSessionKeyTemplate?.Trim() ?? string.Empty;
             var normalizedProviderType = NormalizeProviderType(
                 profile.ProviderType,
                 normalizedDisplayName,
@@ -151,6 +156,16 @@ namespace VividSoul.Runtime.AI
                 ProviderType = normalizedProviderType,
                 BaseUrl = normalizedBaseUrl,
                 Model = normalizedModel,
+                OpenClawGatewayWsUrl = normalizedOpenClawGatewayWsUrl,
+                OpenClawAgentId = normalizedOpenClawAgentId,
+                OpenClawSessionMode = profile.OpenClawSessionMode,
+                OpenClawSessionKeyTemplate = normalizedOpenClawSessionKeyTemplate,
+                OpenClawAutoConnect = profile.OpenClawAutoConnect,
+                OpenClawAutoReconnect = profile.OpenClawAutoReconnect,
+                OpenClawReceiveProactiveMessages = profile.OpenClawReceiveProactiveMessages,
+                OpenClawMirrorTranscriptLocally = profile.OpenClawMirrorTranscriptLocally,
+                OpenClawEnableBubbleForIncoming = profile.OpenClawEnableBubbleForIncoming,
+                OpenClawEnableTtsForIncoming = profile.OpenClawEnableTtsForIncoming,
             };
         }
 
@@ -235,6 +250,16 @@ namespace VividSoul.Runtime.AI
             public string baseUrl = string.Empty;
             public string model = string.Empty;
             public bool enabled = true;
+            public string openClawGatewayWsUrl = string.Empty;
+            public string openClawAgentId = "main";
+            public int openClawSessionMode;
+            public string openClawSessionKeyTemplate = string.Empty;
+            public bool openClawAutoConnect = true;
+            public bool openClawAutoReconnect = true;
+            public bool openClawReceiveProactiveMessages = true;
+            public bool openClawMirrorTranscriptLocally = true;
+            public bool openClawEnableBubbleForIncoming = true;
+            public bool openClawEnableTtsForIncoming;
 
             public LlmProviderProfile ToData()
             {
@@ -244,7 +269,17 @@ namespace VividSoul.Runtime.AI
                     ProviderType: (LlmProviderType)providerType,
                     BaseUrl: baseUrl ?? string.Empty,
                     Model: model ?? string.Empty,
-                    Enabled: enabled);
+                    Enabled: enabled,
+                    OpenClawGatewayWsUrl: openClawGatewayWsUrl ?? string.Empty,
+                    OpenClawAgentId: string.IsNullOrWhiteSpace(openClawAgentId) ? "main" : openClawAgentId,
+                    OpenClawSessionMode: (OpenClawSessionMode)openClawSessionMode,
+                    OpenClawSessionKeyTemplate: openClawSessionKeyTemplate ?? string.Empty,
+                    OpenClawAutoConnect: openClawAutoConnect,
+                    OpenClawAutoReconnect: openClawAutoReconnect,
+                    OpenClawReceiveProactiveMessages: openClawReceiveProactiveMessages,
+                    OpenClawMirrorTranscriptLocally: openClawMirrorTranscriptLocally,
+                    OpenClawEnableBubbleForIncoming: openClawEnableBubbleForIncoming,
+                    OpenClawEnableTtsForIncoming: openClawEnableTtsForIncoming);
             }
 
             public static LlmProviderProfileFile FromData(LlmProviderProfile data)
@@ -257,6 +292,16 @@ namespace VividSoul.Runtime.AI
                     baseUrl = data.BaseUrl,
                     model = data.Model,
                     enabled = data.Enabled,
+                    openClawGatewayWsUrl = data.OpenClawGatewayWsUrl,
+                    openClawAgentId = data.OpenClawAgentId,
+                    openClawSessionMode = (int)data.OpenClawSessionMode,
+                    openClawSessionKeyTemplate = data.OpenClawSessionKeyTemplate,
+                    openClawAutoConnect = data.OpenClawAutoConnect,
+                    openClawAutoReconnect = data.OpenClawAutoReconnect,
+                    openClawReceiveProactiveMessages = data.OpenClawReceiveProactiveMessages,
+                    openClawMirrorTranscriptLocally = data.OpenClawMirrorTranscriptLocally,
+                    openClawEnableBubbleForIncoming = data.OpenClawEnableBubbleForIncoming,
+                    openClawEnableTtsForIncoming = data.OpenClawEnableTtsForIncoming,
                 };
             }
         }

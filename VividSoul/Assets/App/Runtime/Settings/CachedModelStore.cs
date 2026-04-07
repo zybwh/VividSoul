@@ -44,5 +44,22 @@ namespace VividSoul.Runtime.Settings
 
             settingsStore.Save(settings with { CachedModels = cachedModels });
         }
+
+        public void Forget(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("A cached model path is required.", nameof(path));
+            }
+
+            var normalizedPath = Path.GetFullPath(path);
+            var settings = settingsStore.Load();
+            var cachedModels = settings.CachedModels
+                .Where(static model => !string.IsNullOrWhiteSpace(model.Path))
+                .Where(model => !string.Equals(model.Path, normalizedPath, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            settingsStore.Save(settings with { CachedModels = cachedModels });
+        }
     }
 }

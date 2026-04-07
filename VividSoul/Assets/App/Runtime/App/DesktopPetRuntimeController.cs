@@ -76,6 +76,7 @@ namespace VividSoul.Runtime.App
         private CachedModelStore? cachedModelStore;
         private SelectedContentStore? selectedContentStore;
         private MateConversationOrchestrator? mateConversationOrchestrator;
+        private MateConversationService? mateConversationService;
         private CancellationTokenSource? loadCancellationTokenSource;
         private GameObject? currentModelRoot;
         private IReadOnlyList<WorkshopContentItem> workshopContent = Array.Empty<WorkshopContentItem>();
@@ -89,6 +90,8 @@ namespace VividSoul.Runtime.App
         public event Action? ModelCleared;
         public event Action<string>? ModelLoadFailed;
         public event Action<string>? BuiltInPoseTriggered;
+        public event Action<ConversationMessageEnvelope>? ConversationMessageReceived;
+        public event Action<ConversationStatusSnapshot>? ConversationStatusChanged;
 
         public ModelLoadResult? CurrentModel { get; private set; }
 
@@ -149,6 +152,16 @@ namespace VividSoul.Runtime.App
                 new ChatSessionStore(),
                 new LlmUsageStatsStore(),
                 modelFingerprintService);
+            mateConversationService = new MateConversationService(
+                new AiSettingsStore(),
+                new LocalLlmConversationBackend(mateConversationOrchestrator),
+                new OpenClawConversationBackend(
+                    new AiSecretsStore(),
+                    new OpenClawGatewayClient(),
+                    new OpenClawTranscriptMirrorStore(),
+                    modelFingerprintService));
+            mateConversationService.MessageReceived += HandleConversationMessageReceived;
+            mateConversationService.StatusChanged += HandleConversationStatusChanged;
             LoadWindowSettings();
         }
 
@@ -160,6 +173,7 @@ namespace VividSoul.Runtime.App
                 ApplyWindowSettings();
                 await TryConfigureStartupAnimationPackageAsync();
                 MigrateLegacySelectedLocalModelIfNeeded();
+                modelLibraryMigrationService!.MigrateManagedLocalModelDirectoriesIfNeeded();
 
                 if (!restoreSelectedModelOnStart)
                 {
@@ -190,6 +204,13 @@ namespace VividSoul.Runtime.App
         private void OnDestroy()
         {
             CancelCurrentLoad();
+            if (mateConversationService != null)
+            {
+                mateConversationService.MessageReceived -= HandleConversationMessageReceived;
+                mateConversationService.StatusChanged -= HandleConversationStatusChanged;
+                mateConversationService.Dispose();
+                mateConversationService = null;
+            }
         }
 
         [ContextMenu("Open Local Model Dialog")]
@@ -391,6 +412,88 @@ namespace VividSoul.Runtime.App
             }
         }
 
+        public bool CanDeleteManagedLocalModel(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || modelLibraryPaths == null)
+            {
+                return false;
+            }
+
+            return modelLibraryPaths.ContainsPath(Path.GetFullPath(path));
+        }
+
+        public bool IsCurrentModelPath(string path)
+        {
+            return !string.IsNullOrWhiteSpace(path)
+                   && CurrentModel != null
+                   && string.Equals(
+                       CurrentModel.SourcePath,
+                       Path.GetFullPath(path),
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        public string GetManagedLocalModelDisplayDirectory(string path)
+        {
+            EnsureServices();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("A model path is required.", nameof(path));
+            }
+
+            var normalizedPath = Path.GetFullPath(path);
+            var itemDirectory = Path.GetDirectoryName(normalizedPath);
+            if (string.IsNullOrWhiteSpace(itemDirectory) || !modelLibraryPaths!.ContainsPath(itemDirectory))
+            {
+                return normalizedPath;
+            }
+
+            return modelLibraryPaths.GetDisplayRelativeItemDirectory(itemDirectory);
+        }
+
+        public void DeleteManagedLocalModel(string path)
+        {
+            EnsureServices();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("A model path is required.", nameof(path));
+            }
+
+            var normalizedPath = Path.GetFullPath(path);
+            if (!modelLibraryPaths!.ContainsPath(normalizedPath))
+            {
+                throw new UserFacingException("当前只支持删除已导入角色库的本地角色。");
+            }
+
+            var itemDirectory = Path.GetDirectoryName(normalizedPath);
+            if (string.IsNullOrWhiteSpace(itemDirectory))
+            {
+                throw new InvalidOperationException("The model library item directory could not be resolved.");
+            }
+
+            var normalizedItemDirectory = Path.GetFullPath(itemDirectory);
+            if (!modelLibraryPaths.ContainsPath(normalizedItemDirectory))
+            {
+                throw new InvalidOperationException("The target path is outside of the managed model library.");
+            }
+
+            if (IsCurrentModelPath(normalizedPath))
+            {
+                ClearSelectedModel();
+            }
+            else if (selectedContentStore!.Load() is { Type: ContentType.Model } selectedContent
+                     && string.Equals(selectedContent.Data, normalizedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                selectedContentStore.Clear();
+            }
+
+            if (Directory.Exists(normalizedItemDirectory))
+            {
+                Directory.Delete(normalizedItemDirectory, recursive: true);
+            }
+
+            cachedModelStore!.Forget(normalizedPath);
+        }
+
         public void QuitApplication()
         {
             Application.Quit();
@@ -407,7 +510,7 @@ namespace VividSoul.Runtime.App
             windowService?.RequestApplicationFocus();
         }
 
-        public Task<LlmResponseEnvelope> GenerateChatReplyAsync(string userMessage, CancellationToken cancellationToken = default)
+        public Task SendChatMessageAsync(string userMessage, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(userMessage))
             {
@@ -420,11 +523,31 @@ namespace VividSoul.Runtime.App
                 throw new UserFacingException("当前还没有加载角色，暂时无法发起对话。");
             }
 
-            return mateConversationOrchestrator!.GenerateReplyAsync(
+            return mateConversationService!.SendUserMessageAsync(
                 CurrentModel.SourcePath,
                 CurrentModel.DisplayName,
                 userMessage,
                 cancellationToken);
+        }
+
+        public Task RefreshConversationBackendAsync(CancellationToken cancellationToken = default)
+        {
+            EnsureServices();
+            if (CurrentModel == null)
+            {
+                return mateConversationService!.ClearCharacterContextAsync(cancellationToken);
+            }
+
+            return mateConversationService!.SynchronizeAsync(
+                CurrentModel.SourcePath,
+                CurrentModel.DisplayName,
+                cancellationToken);
+        }
+
+        public void MarkConversationMessagesRead()
+        {
+            EnsureServices();
+            mateConversationService?.MarkMessagesRead();
         }
 
         public void NotifyConversationActivity(float durationSeconds = ConversationAmbientPoseSuppressionSeconds)
@@ -642,6 +765,7 @@ namespace VividSoul.Runtime.App
             LastErrorMessage = null;
             selectedContentStore!.Clear();
             ModelCleared?.Invoke();
+            _ = RefreshConversationBackendAsync();
         }
 
         [ContextMenu("Save Current Transform State")]
@@ -828,6 +952,13 @@ namespace VividSoul.Runtime.App
             {
                 var result = await modelLoader!.LoadAsync(path, ModelAnchor, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
+                if (source == ContentSource.Local && modelLibraryPaths!.ContainsPath(result.SourcePath))
+                {
+                    var normalizedPath = modelLibraryMigrationService!.NormalizeManagedLocalModelPath(
+                        result.SourcePath,
+                        result.DisplayName);
+                    result = result with { SourcePath = normalizedPath };
+                }
 
                 if (result.Root.GetComponentInChildren<UniVRM10.Vrm10Instance>() is UniVRM10.Vrm10Instance vrmInstance)
                 {
@@ -862,6 +993,7 @@ namespace VividSoul.Runtime.App
                 }
 
                 ModelLoaded?.Invoke(result);
+                _ = RefreshConversationBackendAsync();
             }
             catch (OperationCanceledException)
             {
@@ -921,11 +1053,34 @@ namespace VividSoul.Runtime.App
                 new ChatSessionStore(),
                 new LlmUsageStatsStore(),
                 modelFingerprintService);
+            if (mateConversationService == null)
+            {
+                mateConversationService = new MateConversationService(
+                    new AiSettingsStore(),
+                    new LocalLlmConversationBackend(mateConversationOrchestrator),
+                    new OpenClawConversationBackend(
+                        new AiSecretsStore(),
+                        new OpenClawGatewayClient(),
+                        new OpenClawTranscriptMirrorStore(),
+                        modelFingerprintService));
+                mateConversationService.MessageReceived += HandleConversationMessageReceived;
+                mateConversationService.StatusChanged += HandleConversationStatusChanged;
+            }
         }
 
         private DesktopPetAnimationController GetAnimationController()
         {
             return GetComponent<DesktopPetAnimationController>();
+        }
+
+        private void HandleConversationMessageReceived(ConversationMessageEnvelope envelope)
+        {
+            ConversationMessageReceived?.Invoke(envelope);
+        }
+
+        private void HandleConversationStatusChanged(ConversationStatusSnapshot status)
+        {
+            ConversationStatusChanged?.Invoke(status);
         }
 
         private DesktopPetFallbackMotionController? GetFallbackMotionController()

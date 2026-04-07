@@ -46,9 +46,10 @@ namespace VividSoul.Runtime.Content
             var itemId = fingerprint.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)
                 ? fingerprint.Substring("sha256:".Length)
                 : fingerprint;
-            var itemDirectory = modelLibraryPaths.GetItemDirectory(itemId);
-            var targetModelPath = modelLibraryPaths.GetModelPath(itemId);
-            var manifestPath = modelLibraryPaths.GetManifestPath(itemId);
+            var title = ResolveTitle(normalizedSourcePath);
+            var itemDirectory = ResolveItemDirectory(itemId, title, fingerprint);
+            var targetModelPath = modelLibraryPaths.GetModelPathForDirectory(itemDirectory);
+            var manifestPath = modelLibraryPaths.GetManifestPathForDirectory(itemDirectory);
             var importedNewItem = false;
 
             Directory.CreateDirectory(modelLibraryPaths.EnsureRootDirectory());
@@ -65,7 +66,7 @@ namespace VividSoul.Runtime.Content
                 WriteManifest(
                     manifestPath,
                     itemId,
-                    ResolveTitle(normalizedSourcePath),
+                    title,
                     fingerprint);
                 importedNewItem = true;
             }
@@ -78,8 +79,60 @@ namespace VividSoul.Runtime.Content
             return new ModelImportResult(item, fingerprint, importedNewItem);
         }
 
+        private string ResolveItemDirectory(string itemId, string title, string fingerprint)
+        {
+            var existingDirectory = TryFindExistingItemDirectory(itemId, fingerprint);
+            return string.IsNullOrWhiteSpace(existingDirectory)
+                ? modelLibraryPaths.GetPreferredItemDirectory(itemId, title)
+                : existingDirectory;
+        }
+
+        private string? TryFindExistingItemDirectory(string itemId, string fingerprint)
+        {
+            var legacyDirectory = modelLibraryPaths.GetItemDirectory(itemId);
+            if (Directory.Exists(legacyDirectory))
+            {
+                return legacyDirectory;
+            }
+
+            var rootDirectory = modelLibraryPaths.EnsureRootDirectory();
+            foreach (var directory in Directory.GetDirectories(rootDirectory))
+            {
+                var manifestPath = modelLibraryPaths.GetManifestPathForDirectory(directory);
+                if (!File.Exists(manifestPath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var manifest = JsonUtility.FromJson<ModelLibraryManifestFile>(File.ReadAllText(manifestPath));
+                    if (manifest == null)
+                    {
+                        continue;
+                    }
+
+                    if (string.Equals(manifest.id, itemId, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(manifest.fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Path.GetFullPath(directory);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
         private static string ResolveTitle(string sourcePath)
         {
+            if (VrmMetadataNameProbe.TryReadDisplayName(sourcePath, out var displayName))
+            {
+                return displayName;
+            }
+
             var fileName = Path.GetFileNameWithoutExtension(sourcePath);
             return string.IsNullOrWhiteSpace(fileName)
                 ? "Imported Model"

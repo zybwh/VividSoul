@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using VividSoul.Runtime.Interaction;
@@ -51,6 +52,8 @@ namespace VividSoul.Runtime.App
         private const float BubbleExtraTextHeightPadding = 14f;
         private const float BubbleExtraTextHeightPerLine = 5f;
         private const float BubbleShapeRasterScale = 4f;
+        private const float BubbleMinShapeRasterScale = 1f;
+        private const int BubbleMaxRasterTextureDimension = 2048;
         private const float BubbleFadeDurationSeconds = 0.16f;
         private const float BubbleBaseHoldDurationSeconds = 1.8f;
         private const float BubblePerCharacterHoldDurationSeconds = 0.045f;
@@ -69,6 +72,8 @@ namespace VividSoul.Runtime.App
         private static Font? bubbleFont;
         private static Sprite? bubbleFallbackSprite;
         private static Sprite? bubbleShadowSprite;
+        private static readonly Dictionary<int, Sprite> circleSpriteCache = new();
+        private static readonly HashSet<Sprite> sharedGeneratedSprites = new();
 
         private readonly DesktopPetBoundsService boundsService;
 
@@ -867,18 +872,29 @@ namespace VividSoul.Runtime.App
             image.type = Image.Type.Simple;
             image.preserveAspect = false;
 
-            if (previousSprite != null
-                && previousSprite != bubbleFallbackSprite
-                && previousSprite != bubbleShadowSprite)
+            if (CanDestroyGeneratedSprite(previousSprite))
             {
-                var previousTexture = previousSprite.texture;
-                if (previousTexture != null && previousTexture != Texture2D.whiteTexture)
-                {
-                    UnityEngine.Object.Destroy(previousTexture);
-                }
-
-                UnityEngine.Object.Destroy(previousSprite);
+                DestroyGeneratedSprite(previousSprite!);
             }
+        }
+
+        private static bool CanDestroyGeneratedSprite(Sprite? sprite)
+        {
+            return sprite != null
+                   && sprite != bubbleFallbackSprite
+                   && sprite != bubbleShadowSprite
+                   && !sharedGeneratedSprites.Contains(sprite);
+        }
+
+        private static void DestroyGeneratedSprite(Sprite sprite)
+        {
+            var texture = sprite.texture;
+            if (texture != null && texture != Texture2D.whiteTexture)
+            {
+                UnityEngine.Object.Destroy(texture);
+            }
+
+            UnityEngine.Object.Destroy(sprite);
         }
 
         private static Sprite BuildRoundedRectSprite(
@@ -901,13 +917,23 @@ namespace VividSoul.Runtime.App
             float strokeWidth)
         {
             var safeSize = Mathf.Max(1f, size);
-            return BuildCircleMaskSprite(safeSize);
+            var cacheKey = Mathf.RoundToInt(safeSize * 100f);
+            if (circleSpriteCache.TryGetValue(cacheKey, out var cachedSprite) && cachedSprite != null)
+            {
+                return cachedSprite;
+            }
+
+            var sprite = BuildCircleMaskSprite(safeSize);
+            circleSpriteCache[cacheKey] = sprite;
+            sharedGeneratedSprites.Add(sprite);
+            return sprite;
         }
 
         private static Sprite BuildRoundedRectMaskSprite(float width, float height, float cornerRadius)
         {
-            var textureWidth = GetShapeRasterDimension(width);
-            var textureHeight = GetShapeRasterDimension(height);
+            var rasterScale = GetShapeRasterScale(width, height);
+            var textureWidth = GetShapeRasterDimension(width, rasterScale);
+            var textureHeight = GetShapeRasterDimension(height, rasterScale);
             var texture = new Texture2D(textureWidth, textureHeight, TextureFormat.RGBA32, false);
             texture.wrapMode = TextureWrapMode.Clamp;
             texture.filterMode = FilterMode.Bilinear;
@@ -916,14 +942,14 @@ namespace VividSoul.Runtime.App
             var halfWidth = width * 0.5f;
             var halfHeight = height * 0.5f;
             var radius = Mathf.Clamp(cornerRadius, 1f, Mathf.Min(halfWidth, halfHeight));
-            var aaWidth = 1f / BubbleShapeRasterScale;
+            var aaWidth = 1f / rasterScale;
 
             for (var y = 0; y < textureHeight; y++)
             {
-                var localY = ((y + 0.5f) / BubbleShapeRasterScale) - halfHeight;
+                var localY = ((y + 0.5f) / rasterScale) - halfHeight;
                 for (var x = 0; x < textureWidth; x++)
                 {
-                    var localX = ((x + 0.5f) / BubbleShapeRasterScale) - halfWidth;
+                    var localX = ((x + 0.5f) / rasterScale) - halfWidth;
                     var distance = SignedDistanceToRoundedRect(localX, localY, halfWidth, halfHeight, radius);
                     var alpha = Mathf.Clamp01(0.5f - (distance / aaWidth));
                     pixels[(y * textureWidth) + x] = new Color(1f, 1f, 1f, alpha);
@@ -937,26 +963,27 @@ namespace VividSoul.Runtime.App
                 texture,
                 new Rect(0f, 0f, texture.width, texture.height),
                 new Vector2(0.5f, 0.5f),
-                BubbleShapeRasterScale);
+                rasterScale);
         }
 
         private static Sprite BuildCircleMaskSprite(float size)
         {
-            var textureSize = GetShapeRasterDimension(size);
+            var rasterScale = GetShapeRasterScale(size, size);
+            var textureSize = GetShapeRasterDimension(size, rasterScale);
             var texture = new Texture2D(textureSize, textureSize, TextureFormat.RGBA32, false);
             texture.wrapMode = TextureWrapMode.Clamp;
             texture.filterMode = FilterMode.Bilinear;
 
             var pixels = new Color32[textureSize * textureSize];
             var radius = size * 0.5f;
-            var aaWidth = 1f / BubbleShapeRasterScale;
+            var aaWidth = 1f / rasterScale;
 
             for (var y = 0; y < textureSize; y++)
             {
-                var localY = ((y + 0.5f) / BubbleShapeRasterScale) - radius;
+                var localY = ((y + 0.5f) / rasterScale) - radius;
                 for (var x = 0; x < textureSize; x++)
                 {
-                    var localX = ((x + 0.5f) / BubbleShapeRasterScale) - radius;
+                    var localX = ((x + 0.5f) / rasterScale) - radius;
                     var distance = Mathf.Sqrt((localX * localX) + (localY * localY)) - (radius - (aaWidth * 0.5f));
                     var alpha = Mathf.Clamp01(0.5f - (distance / aaWidth));
                     pixels[(y * textureSize) + x] = new Color(1f, 1f, 1f, alpha);
@@ -970,15 +997,27 @@ namespace VividSoul.Runtime.App
                 texture,
                 new Rect(0f, 0f, texture.width, texture.height),
                 new Vector2(0.5f, 0.5f),
+                rasterScale);
+        }
+
+        private static float GetShapeRasterScale(float width, float height)
+        {
+            var safeWidth = Mathf.Max(1f, width);
+            var safeHeight = Mathf.Max(1f, height);
+            var widthLimitedScale = BubbleMaxRasterTextureDimension / safeWidth;
+            var heightLimitedScale = BubbleMaxRasterTextureDimension / safeHeight;
+            return Mathf.Clamp(
+                Mathf.Min(BubbleShapeRasterScale, widthLimitedScale, heightLimitedScale),
+                BubbleMinShapeRasterScale,
                 BubbleShapeRasterScale);
         }
 
-        private static int GetShapeRasterDimension(float size)
+        private static int GetShapeRasterDimension(float size, float rasterScale)
         {
             return Mathf.Clamp(
-                Mathf.CeilToInt(Mathf.Max(1f, size) * BubbleShapeRasterScale),
+                Mathf.CeilToInt(Mathf.Max(1f, size) * rasterScale),
                 32,
-                2048);
+                BubbleMaxRasterTextureDimension);
         }
 
         private static float SignedDistanceToRoundedRect(float x, float y, float halfWidth, float halfHeight, float radius)

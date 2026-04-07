@@ -4,9 +4,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 using VividSoul.Runtime.AI;
+using VividSoul.Runtime.Avatar;
+using VividSoul.Runtime.Settings;
 
 namespace VividSoul.Runtime.App
 {
@@ -51,25 +54,37 @@ namespace VividSoul.Runtime.App
         private readonly IAiSecretsStore aiSecretsStore;
         private readonly IAiSettingsStore aiSettingsStore;
         private readonly ILlmUsageStatsStore llmUsageStatsStore;
+        private readonly DesktopPetRuntimeController runtimeController;
         private readonly Action<string> statusReporter;
 
         private AiSettingsData editingSettings = default!;
         private Dictionary<string, string> editingApiKeys = new(StringComparer.OrdinalIgnoreCase);
+        private GeneralTabUi? generalTabUi;
         private SettingsWindowUi? windowUi;
         private SettingsTab activeTab = SettingsTab.Llm;
+        private string pendingDeleteModelPath = string.Empty;
         private string selectedProviderId = string.Empty;
         private string configurationStatusMessage = "当前配置尚未保存。";
         private float nextStatsRefreshAt;
 
-        public DesktopPetSettingsWindowPresenter(Action<string> statusReporter)
+        public DesktopPetSettingsWindowPresenter(DesktopPetRuntimeController runtimeController, Action<string> statusReporter)
         {
+            this.runtimeController = runtimeController ?? throw new ArgumentNullException(nameof(runtimeController));
             this.statusReporter = statusReporter ?? throw new ArgumentNullException(nameof(statusReporter));
             aiSettingsStore = new AiSettingsStore();
             aiSecretsStore = new AiSecretsStore();
             llmUsageStatsStore = new LlmUsageStatsStore();
+            this.runtimeController.ModelLoaded += HandleRuntimeModelChanged;
+            this.runtimeController.ModelCleared += HandleRuntimeModelCleared;
         }
 
         public bool IsVisible => windowUi != null && windowUi.Root.gameObject.activeSelf;
+
+        public void Dispose()
+        {
+            runtimeController.ModelLoaded -= HandleRuntimeModelChanged;
+            runtimeController.ModelCleared -= HandleRuntimeModelCleared;
+        }
 
         public void Show(Canvas canvas)
         {
@@ -80,6 +95,7 @@ namespace VividSoul.Runtime.App
 
             EnsureWindowUi(canvas);
             LoadEditingState();
+            RefreshManagedModelLibraryList();
             ResizeWindow();
             ShowTab(activeTab);
             windowUi!.Root.gameObject.SetActive(true);
@@ -118,6 +134,28 @@ namespace VividSoul.Runtime.App
             {
                 Hide();
             }
+        }
+
+        private void HandleRuntimeModelChanged(ModelLoadResult _)
+        {
+            if (!IsVisible || activeTab != SettingsTab.General)
+            {
+                return;
+            }
+
+            pendingDeleteModelPath = string.Empty;
+            RefreshManagedModelLibraryList();
+        }
+
+        private void HandleRuntimeModelCleared()
+        {
+            if (!IsVisible || activeTab != SettingsTab.General)
+            {
+                return;
+            }
+
+            pendingDeleteModelPath = string.Empty;
+            RefreshManagedModelLibraryList();
         }
 
         private void EnsureWindowUi(Canvas canvas)
@@ -208,7 +246,7 @@ namespace VividSoul.Runtime.App
                 sidebar.GeneralTabButtonText,
                 sidebar.LlmTabButton,
                 sidebar.LlmTabButtonText,
-                generalContent,
+                generalContent.Root,
                 llmContent.Root,
                 llmContent.ScrollRoot,
                 llmContent.ScrollContent,
@@ -234,10 +272,12 @@ namespace VividSoul.Runtime.App
                 llmContent.SummaryThresholdInput,
                 llmContent.EnableTtsToggle,
                 llmContent.StatsText);
+            generalTabUi = generalContent;
 
             header.CloseButton.onClick.AddListener(Hide);
             sidebar.GeneralTabButton.onClick.AddListener(() => ShowTab(SettingsTab.General));
             sidebar.LlmTabButton.onClick.AddListener(() => ShowTab(SettingsTab.Llm));
+            generalContent.RefreshButton.onClick.AddListener(RefreshManagedModelLibraryList);
             llmContent.AddProviderButton.onClick.AddListener(AddProviderProfile);
             llmContent.RemoveProviderButton.onClick.AddListener(RemoveSelectedProviderProfile);
             llmContent.CycleProviderTypeButton.onClick.AddListener(CycleSelectedProviderType);
@@ -390,7 +430,18 @@ namespace VividSoul.Runtime.App
             }
 
             var nextType = (LlmProviderType)(((int)selectedProfile.ProviderType + 1) % Enum.GetValues(typeof(LlmProviderType)).Length);
-            UpdateSelectedProvider(selectedProfile with { ProviderType = nextType });
+            UpdateSelectedProvider(nextType == LlmProviderType.OpenClaw
+                ? selectedProfile with
+                {
+                    ProviderType = nextType,
+                    OpenClawGatewayWsUrl = string.IsNullOrWhiteSpace(selectedProfile.OpenClawGatewayWsUrl)
+                        ? "ws://127.0.0.1:18789"
+                        : selectedProfile.OpenClawGatewayWsUrl,
+                    OpenClawAgentId = string.IsNullOrWhiteSpace(selectedProfile.OpenClawAgentId)
+                        ? "main"
+                        : selectedProfile.OpenClawAgentId,
+                }
+                : selectedProfile with { ProviderType = nextType });
             ApplySelectedProviderToUi();
         }
 
@@ -471,13 +522,23 @@ namespace VividSoul.Runtime.App
                 return false;
             }
 
-            var updatedProfile = selectedProfile with
-            {
-                DisplayName = windowUi.ProviderDisplayNameInput.text.Trim(),
-                BaseUrl = windowUi.ProviderBaseUrlInput.text.Trim(),
-                Model = windowUi.ProviderModelInput.text.Trim(),
-                Enabled = windowUi.ProviderEnabledToggle.isOn,
-            };
+            var updatedProfile = selectedProfile.ProviderType == LlmProviderType.OpenClaw
+                ? selectedProfile with
+                {
+                    DisplayName = windowUi.ProviderDisplayNameInput.text.Trim(),
+                    BaseUrl = string.Empty,
+                    Model = string.Empty,
+                    Enabled = windowUi.ProviderEnabledToggle.isOn,
+                    OpenClawGatewayWsUrl = windowUi.ProviderBaseUrlInput.text.Trim(),
+                    OpenClawAgentId = windowUi.ProviderModelInput.text.Trim(),
+                }
+                : selectedProfile with
+                {
+                    DisplayName = windowUi.ProviderDisplayNameInput.text.Trim(),
+                    BaseUrl = windowUi.ProviderBaseUrlInput.text.Trim(),
+                    Model = windowUi.ProviderModelInput.text.Trim(),
+                    Enabled = windowUi.ProviderEnabledToggle.isOn,
+                };
             if (string.IsNullOrWhiteSpace(updatedProfile.DisplayName))
             {
                 errorMessage = "Provider 名称不能为空。";
@@ -536,8 +597,12 @@ namespace VividSoul.Runtime.App
             windowUi.ProviderDisplayNameInput.text = selectedProfile.DisplayName;
             windowUi.ProviderTypeValueText.text = GetProviderTypeLabel(selectedProfile.ProviderType);
             windowUi.ProviderEnabledToggle.isOn = selectedProfile.Enabled;
-            windowUi.ProviderBaseUrlInput.text = selectedProfile.BaseUrl;
-            windowUi.ProviderModelInput.text = selectedProfile.Model;
+            windowUi.ProviderBaseUrlInput.text = selectedProfile.ProviderType == LlmProviderType.OpenClaw
+                ? selectedProfile.OpenClawGatewayWsUrl
+                : selectedProfile.BaseUrl;
+            windowUi.ProviderModelInput.text = selectedProfile.ProviderType == LlmProviderType.OpenClaw
+                ? selectedProfile.OpenClawAgentId
+                : selectedProfile.Model;
             windowUi.ProviderApiKeyInput.text = editingApiKeys.TryGetValue(selectedProfile.Id, out var apiKey) ? apiKey : string.Empty;
             windowUi.ConfigurationStatusText.text = BuildConfigurationStatusText(selectedProfile);
             RebuildProviderButtons();
@@ -593,6 +658,11 @@ namespace VividSoul.Runtime.App
             windowUi.LlmContent.SetActive(!isGeneral);
             SetTabVisual(windowUi.GeneralTabButton, windowUi.GeneralTabButtonText, isGeneral);
             SetTabVisual(windowUi.LlmTabButton, windowUi.LlmTabButtonText, !isGeneral);
+            if (isGeneral)
+            {
+                RefreshManagedModelLibraryList();
+            }
+
             RebuildLayout();
             LogLayoutDiagnostics($"tab:{tab}");
         }
@@ -663,7 +733,7 @@ namespace VividSoul.Runtime.App
             return root;
         }
 
-        private GameObject CreateGeneralTab(Transform parent)
+        private GeneralTabUi CreateGeneralTab(Transform parent)
         {
             var root = new GameObject("GeneralTab", typeof(RectTransform));
             var rootRect = root.GetComponent<RectTransform>();
@@ -673,12 +743,148 @@ namespace VividSoul.Runtime.App
             rootRect.offsetMin = new Vector2(18f, 18f);
             rootRect.offsetMax = new Vector2(-18f, -18f);
 
-            CreateScrollView(root.transform, out var content);
+            var scrollRoot = CreateScrollView(root.transform, out var content);
 
             var card = CreateSectionCard(content, "GeneralCard", "常规");
-            SetPreferredHeight(card, 180f);
-            CreateBodyText(card, "后续会把窗口、角色、动画、音频等统一放进这里。\n当前第一批先落地 LLM 设置、API Key 管理和调用统计。");
-            return root;
+            SetPreferredHeight(card, 132f);
+            CreateBodyText(card, "这里先放角色库管理。导入过的本地角色会显示在下方，并支持在设置内直接切换或删除。");
+
+            var librarySection = CreateSectionCard(content, "ModelLibrarySection", "角色库管理");
+            CreateHintText(librarySection, "仅显示已导入到角色库的本地角色。删除会移除对应角色文件；当前角色删除后会先卸载。");
+            var toolbar = CreateLayoutContainer(librarySection, "Toolbar", isHorizontal: true, 8f, new RectOffset(0, 0, 0, 0), fitToContents: true);
+            var toolbarSpacer = new GameObject("Spacer", typeof(RectTransform), typeof(LayoutElement));
+            toolbarSpacer.transform.SetParent(toolbar, false);
+            toolbarSpacer.GetComponent<LayoutElement>().flexibleWidth = 1f;
+            var refreshButton = CreateButton(toolbar, "刷新列表", ButtonMutedColor, 40f, 104f);
+            var libraryHintText = CreateHintText(librarySection, string.Empty);
+            var libraryListRoot = CreateLayoutContainer(librarySection, "LibraryList", isHorizontal: false, 10f, new RectOffset(0, 0, 0, 0));
+            libraryListRoot.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            var libraryListLayout = libraryListRoot.gameObject.AddComponent<LayoutElement>();
+            libraryListLayout.minHeight = 40f;
+
+            return new GeneralTabUi(
+                root,
+                scrollRoot,
+                content,
+                librarySection,
+                libraryHintText,
+                libraryListRoot,
+                refreshButton);
+        }
+
+        private void RefreshManagedModelLibraryList()
+        {
+            if (generalTabUi == null)
+            {
+                return;
+            }
+
+            ClearChildren(generalTabUi.LibraryListRoot);
+            var cachedModels = runtimeController.CachedModels
+                .Where(model => runtimeController.CanDeleteManagedLocalModel(model.Path))
+                .ToArray();
+            if (!cachedModels.Any())
+            {
+                pendingDeleteModelPath = string.Empty;
+                generalTabUi.LibraryHintText.text = "当前还没有可管理的导入角色。通过右键菜单里的“添加角色”导入后，这里会自动出现。";
+                RebuildLayout();
+                return;
+            }
+
+            if (!cachedModels.Any(model => PathsEqual(model.Path, pendingDeleteModelPath)))
+            {
+                pendingDeleteModelPath = string.Empty;
+            }
+
+            generalTabUi.LibraryHintText.text = "点击“删除”后需要再点一次确认，避免误删。";
+            foreach (var cachedModel in cachedModels)
+            {
+                CreateManagedModelRow(cachedModel);
+            }
+
+            RebuildLayout();
+        }
+
+        private void CreateManagedModelRow(CachedModelState cachedModel)
+        {
+            if (generalTabUi == null)
+            {
+                return;
+            }
+
+            var row = CreateLayoutContainer(
+                generalTabUi.LibraryListRoot,
+                $"ModelRow-{cachedModel.DisplayName}",
+                isHorizontal: true,
+                spacing: 12f,
+                padding: new RectOffset(14, 14, 12, 12),
+                fitToContents: true);
+            var rowImage = row.gameObject.AddComponent<Image>();
+            rowImage.color = InputColor;
+            var rowOutline = row.gameObject.AddComponent<Outline>();
+            rowOutline.effectColor = SectionBorderColor;
+            rowOutline.effectDistance = new Vector2(1f, -1f);
+
+            var detailsColumn = CreateLayoutContainer(row, "Details", isHorizontal: false, 4f, new RectOffset(0, 0, 0, 0), fitToContents: true);
+            var detailsLayout = detailsColumn.gameObject.AddComponent<LayoutElement>();
+            detailsLayout.flexibleWidth = 1f;
+
+            var isCurrentModel = runtimeController.IsCurrentModelPath(cachedModel.Path);
+            var modelExists = File.Exists(cachedModel.Path);
+            var title = isCurrentModel
+                ? $"{GetManagedModelDisplayName(cachedModel)}  (当前)"
+                : GetManagedModelDisplayName(cachedModel);
+            var titleText = CreateText(detailsColumn, "Title", title, 16, FontStyle.Bold, TextPrimaryColor, TextAnchor.UpperLeft);
+            titleText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            titleText.verticalOverflow = VerticalWrapMode.Overflow;
+
+            var directoryPath = runtimeController.GetManagedLocalModelDisplayDirectory(cachedModel.Path);
+            var directoryLabel = modelExists
+                ? $"模型存放目录：{directoryPath}"
+                : $"模型存放目录：{directoryPath}\n当前文件已缺失，但仍可删除这条记录。";
+            CreateBodyText(detailsColumn, directoryLabel, 13, TextSecondaryColor);
+
+            var actionColumn = CreateLayoutContainer(row, "Actions", isHorizontal: false, 8f, new RectOffset(0, 0, 0, 0), fitToContents: true);
+            var actionColumnLayout = actionColumn.gameObject.AddComponent<LayoutElement>();
+            actionColumnLayout.preferredWidth = 104f;
+            actionColumnLayout.minWidth = 104f;
+            if (actionColumn.GetComponent<VerticalLayoutGroup>() is VerticalLayoutGroup actionLayoutGroup)
+            {
+                actionLayoutGroup.childAlignment = TextAnchor.UpperRight;
+                actionLayoutGroup.childControlWidth = false;
+                actionLayoutGroup.childForceExpandWidth = false;
+            }
+
+            var isPendingDelete = PathsEqual(cachedModel.Path, pendingDeleteModelPath);
+            var deleteButton = CreateButton(actionColumn, isPendingDelete ? "确认删除" : "删除", ButtonDangerColor, 36f, 96f);
+            deleteButton.onClick.AddListener(() => DeleteManagedModel(cachedModel));
+        }
+
+        private void DeleteManagedModel(CachedModelState cachedModel)
+        {
+            if (!PathsEqual(cachedModel.Path, pendingDeleteModelPath))
+            {
+                pendingDeleteModelPath = cachedModel.Path;
+                statusReporter($"再次点击“确认删除”以移除角色：{cachedModel.DisplayName}");
+                RefreshManagedModelLibraryList();
+                return;
+            }
+
+            try
+            {
+                runtimeController.DeleteManagedLocalModel(cachedModel.Path);
+                pendingDeleteModelPath = string.Empty;
+                statusReporter($"已删除角色：{cachedModel.DisplayName}");
+                RefreshManagedModelLibraryList();
+            }
+            catch (UserFacingException exception)
+            {
+                statusReporter(exception.Message);
+            }
+            catch (Exception exception)
+            {
+                statusReporter($"删除角色失败：{exception.Message}");
+            }
         }
 
         private LlmTabUi CreateLlmTab(Transform parent)
@@ -1338,6 +1544,7 @@ namespace VividSoul.Runtime.App
                 LlmProviderType.Anthropic => "Anthropic",
                 LlmProviderType.Gemini => "Gemini",
                 LlmProviderType.Ollama => "Ollama",
+                LlmProviderType.OpenClaw => "OpenClaw",
                 _ => providerType.ToString(),
             };
         }
@@ -1345,6 +1552,24 @@ namespace VividSoul.Runtime.App
         private static string Fallback(string value, string fallback)
         {
             return string.IsNullOrWhiteSpace(value) ? fallback : value;
+        }
+
+        private static bool PathsEqual(string left, string right)
+        {
+            return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetManagedModelDisplayName(CachedModelState cachedModel)
+        {
+            var extension = Path.GetExtension(cachedModel.Path);
+            if (string.IsNullOrWhiteSpace(extension))
+            {
+                return cachedModel.DisplayName;
+            }
+
+            return cachedModel.DisplayName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+                ? cachedModel.DisplayName
+                : $"{cachedModel.DisplayName}{extension}";
         }
 
         private static string TryFormatTimestamp(string rawTimestamp)
@@ -1361,8 +1586,12 @@ namespace VividSoul.Runtime.App
 
         private string BuildConfigurationStatusText(LlmProviderProfile profile)
         {
-            var hasApiUrl = !string.IsNullOrWhiteSpace(profile.BaseUrl);
-            var hasModel = !string.IsNullOrWhiteSpace(profile.Model);
+            var hasApiUrl = profile.ProviderType == LlmProviderType.OpenClaw
+                ? !string.IsNullOrWhiteSpace(profile.OpenClawGatewayWsUrl)
+                : !string.IsNullOrWhiteSpace(profile.BaseUrl);
+            var hasModel = profile.ProviderType == LlmProviderType.OpenClaw
+                ? !string.IsNullOrWhiteSpace(profile.OpenClawAgentId)
+                : !string.IsNullOrWhiteSpace(profile.Model);
             var hasApiKey = editingApiKeys.TryGetValue(profile.Id, out var apiKey) && !string.IsNullOrWhiteSpace(apiKey);
             var completeness = hasApiUrl && hasModel && hasApiKey
                 ? "字段完整"
@@ -1472,6 +1701,41 @@ namespace VividSoul.Runtime.App
             public Button LlmTabButton { get; }
 
             public Text LlmTabButtonText { get; }
+        }
+
+        private sealed class GeneralTabUi
+        {
+            public GeneralTabUi(
+                GameObject root,
+                RectTransform scrollRoot,
+                RectTransform scrollContent,
+                RectTransform librarySection,
+                Text libraryHintText,
+                RectTransform libraryListRoot,
+                Button refreshButton)
+            {
+                Root = root;
+                ScrollRoot = scrollRoot;
+                ScrollContent = scrollContent;
+                LibrarySection = librarySection;
+                LibraryHintText = libraryHintText;
+                LibraryListRoot = libraryListRoot;
+                RefreshButton = refreshButton;
+            }
+
+            public GameObject Root { get; }
+
+            public RectTransform ScrollRoot { get; }
+
+            public RectTransform ScrollContent { get; }
+
+            public RectTransform LibrarySection { get; }
+
+            public Text LibraryHintText { get; }
+
+            public RectTransform LibraryListRoot { get; }
+
+            public Button RefreshButton { get; }
         }
 
         private sealed class LlmTabUi

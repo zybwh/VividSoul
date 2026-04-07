@@ -523,12 +523,17 @@ namespace VividSoul.Runtime.Animation
 
             foreach (var boneState in boneStates)
             {
-                boneState.DefaultLocalRotation = boneState.Transform.localRotation;
-                boneState.TransitionSourceRotation = boneState.Transform.localRotation;
+                var defaultRotation = ShouldKeepSampledDefaultPose(boneState.Bone)
+                    ? boneState.Transform.localRotation
+                    : boneState.BaseLocalRotation;
+                boneState.DefaultLocalRotation = defaultRotation;
+                boneState.TransitionSourceRotation = defaultRotation;
+                boneState.Transform.localRotation = defaultRotation;
                 if (boneState.Bone == HumanBodyBones.Hips)
                 {
-                    boneState.DefaultLocalPosition = boneState.Transform.localPosition;
-                    boneState.TransitionSourcePosition = boneState.Transform.localPosition;
+                    boneState.DefaultLocalPosition = boneState.BaseLocalPosition;
+                    boneState.TransitionSourcePosition = boneState.BaseLocalPosition;
+                    boneState.Transform.localPosition = boneState.BaseLocalPosition;
                 }
             }
 
@@ -907,6 +912,60 @@ namespace VividSoul.Runtime.Animation
             }
 
             return Vector3.zero;
+        }
+
+        private static bool ShouldKeepSampledDefaultPose(HumanBodyBones bone)
+        {
+            return bone switch
+            {
+                HumanBodyBones.Spine => true,
+                HumanBodyBones.Chest => true,
+                HumanBodyBones.UpperChest => true,
+                HumanBodyBones.Neck => true,
+                HumanBodyBones.Head => true,
+                HumanBodyBones.LeftEye => true,
+                HumanBodyBones.RightEye => true,
+                HumanBodyBones.Jaw => true,
+                HumanBodyBones.LeftShoulder => true,
+                HumanBodyBones.RightShoulder => true,
+                HumanBodyBones.LeftUpperArm => true,
+                HumanBodyBones.RightUpperArm => true,
+                HumanBodyBones.LeftLowerArm => true,
+                HumanBodyBones.RightLowerArm => true,
+                HumanBodyBones.LeftHand => true,
+                HumanBodyBones.RightHand => true,
+                HumanBodyBones.LeftThumbProximal => true,
+                HumanBodyBones.LeftThumbIntermediate => true,
+                HumanBodyBones.LeftThumbDistal => true,
+                HumanBodyBones.LeftIndexProximal => true,
+                HumanBodyBones.LeftIndexIntermediate => true,
+                HumanBodyBones.LeftIndexDistal => true,
+                HumanBodyBones.LeftMiddleProximal => true,
+                HumanBodyBones.LeftMiddleIntermediate => true,
+                HumanBodyBones.LeftMiddleDistal => true,
+                HumanBodyBones.LeftRingProximal => true,
+                HumanBodyBones.LeftRingIntermediate => true,
+                HumanBodyBones.LeftRingDistal => true,
+                HumanBodyBones.LeftLittleProximal => true,
+                HumanBodyBones.LeftLittleIntermediate => true,
+                HumanBodyBones.LeftLittleDistal => true,
+                HumanBodyBones.RightThumbProximal => true,
+                HumanBodyBones.RightThumbIntermediate => true,
+                HumanBodyBones.RightThumbDistal => true,
+                HumanBodyBones.RightIndexProximal => true,
+                HumanBodyBones.RightIndexIntermediate => true,
+                HumanBodyBones.RightIndexDistal => true,
+                HumanBodyBones.RightMiddleProximal => true,
+                HumanBodyBones.RightMiddleIntermediate => true,
+                HumanBodyBones.RightMiddleDistal => true,
+                HumanBodyBones.RightRingProximal => true,
+                HumanBodyBones.RightRingIntermediate => true,
+                HumanBodyBones.RightRingDistal => true,
+                HumanBodyBones.RightLittleProximal => true,
+                HumanBodyBones.RightLittleIntermediate => true,
+                HumanBodyBones.RightLittleDistal => true,
+                _ => false,
+            };
         }
 
         private static float EaseOutCubic(float value)

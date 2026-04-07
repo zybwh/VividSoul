@@ -121,6 +121,7 @@ namespace VividSoul.Editor
             PlayerSettings.defaultScreenHeight = 800;
             PlayerSettings.runInBackground = true;
             PlayerSettings.allowFullscreenSwitch = false;
+            PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
         }
 
         private static string GetBuildDirectory()

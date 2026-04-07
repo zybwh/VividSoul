@@ -52,6 +52,7 @@ namespace VividSoul.Runtime.App
         private static Font? uiFont;
 
         private readonly Action<string> onUserMessageSubmitted;
+        private readonly Action? onExpanded;
         private readonly Action<string> statusReporter;
         private readonly IAiSettingsStore aiSettingsStore;
         private readonly List<ChatEntry> entries = new();
@@ -59,13 +60,16 @@ namespace VividSoul.Runtime.App
         private ChatOverlayUi? chatUi;
         private bool isExpanded;
         private bool isRequestInFlight;
+        private int unreadCount;
         private float nextSettingsRefreshAt;
         private string providerSummaryBaseText = string.Empty;
+        private ConversationStatusSnapshot? currentConversationStatus;
 
-        public DesktopPetChatOverlayPresenter(Action<string> statusReporter, Action<string> onUserMessageSubmitted)
+        public DesktopPetChatOverlayPresenter(Action<string> statusReporter, Action<string> onUserMessageSubmitted, Action? onExpanded = null)
         {
             this.statusReporter = statusReporter ?? throw new ArgumentNullException(nameof(statusReporter));
             this.onUserMessageSubmitted = onUserMessageSubmitted ?? throw new ArgumentNullException(nameof(onUserMessageSubmitted));
+            this.onExpanded = onExpanded;
             aiSettingsStore = new AiSettingsStore();
         }
 
@@ -136,6 +140,11 @@ namespace VividSoul.Runtime.App
             AppendMessage(MessageRole.Mate, "VividSoul", message);
         }
 
+        public void AppendUserMessage(string message)
+        {
+            AppendMessage(MessageRole.User, "你", message);
+        }
+
         public void AppendSystemMessage(string message)
         {
             AppendMessage(MessageRole.System, "系统", message);
@@ -153,6 +162,19 @@ namespace VividSoul.Runtime.App
             chatUi.ClearButton.interactable = !value;
             chatUi.CollapseButton.interactable = true;
             RefreshSendButtonState();
+            ApplyProviderSummaryText();
+        }
+
+        public void SetConversationStatus(ConversationStatusSnapshot status)
+        {
+            currentConversationStatus = status;
+            unreadCount = Mathf.Max(0, status.UnreadCount);
+            if (isExpanded)
+            {
+                unreadCount = 0;
+            }
+
+            UpdateLauncherLabel();
             ApplyProviderSummaryText();
         }
 
@@ -427,7 +449,13 @@ namespace VividSoul.Runtime.App
 
         private void SetExpanded(bool expanded, bool focusInput)
         {
+            var wasExpanded = isExpanded;
             isExpanded = expanded;
+            if (expanded)
+            {
+                unreadCount = 0;
+            }
+
             if (chatUi == null)
             {
                 return;
@@ -436,8 +464,14 @@ namespace VividSoul.Runtime.App
             chatUi.LauncherButton.gameObject.SetActive(!expanded);
             chatUi.PanelRoot.gameObject.SetActive(expanded);
             chatUi.Root.SetAsLastSibling();
+            UpdateLauncherLabel();
             if (expanded)
             {
+                if (!wasExpanded)
+                {
+                    onExpanded?.Invoke();
+                }
+
                 ScrollHistoryToBottom();
                 RefreshProviderSummary();
                 RefreshSendButtonState();
@@ -477,7 +511,6 @@ namespace VividSoul.Runtime.App
                 return;
             }
 
-            AppendMessage(MessageRole.User, "你", text);
             chatUi.InputField.text = string.Empty;
             RefreshSendButtonState();
             onUserMessageSubmitted(text);
@@ -509,6 +542,11 @@ namespace VividSoul.Runtime.App
             CreateMessageBubble(chatUi.HistoryContent, entry);
             ScrollHistoryToBottom();
             chatUi.Root.SetAsLastSibling();
+            if (!isExpanded && role == MessageRole.Mate)
+            {
+                unreadCount++;
+                UpdateLauncherLabel();
+            }
         }
 
         private void CreateMessageBubble(RectTransform parent, ChatEntry entry)
@@ -612,9 +650,11 @@ namespace VividSoul.Runtime.App
             var activeProfile = settings.ProviderProfiles.FirstOrDefault(profile =>
                                     string.Equals(profile.Id, settings.ActiveProviderId, StringComparison.OrdinalIgnoreCase))
                                 ?? settings.ProviderProfiles.FirstOrDefault();
-            var providerText = activeProfile == null
-                ? "当前未配置 Provider"
-                : $"当前 Provider：{activeProfile.DisplayName} | {FormatProviderType(activeProfile.ProviderType)} | {(activeProfile.Enabled ? "已启用" : "未启用")}";
+            var providerText = currentConversationStatus == null
+                ? activeProfile == null
+                    ? "当前未配置 Provider"
+                    : $"当前 Provider：{activeProfile.DisplayName} | {FormatProviderType(activeProfile.ProviderType)} | {(activeProfile.Enabled ? "已启用" : "未启用")}"
+                : BuildConversationStatusSummary(currentConversationStatus);
             providerSummaryBaseText = providerText;
             ApplyProviderSummaryText();
             nextSettingsRefreshAt = Time.unscaledTime + SettingsRefreshIntervalSeconds;
@@ -633,6 +673,44 @@ namespace VividSoul.Runtime.App
             chatUi.ProviderSummaryText.text = $"{providerSummaryBaseText}{suffix}";
         }
 
+        private void UpdateLauncherLabel()
+        {
+            if (chatUi == null)
+            {
+                return;
+            }
+
+            chatUi.LauncherLabel.text = unreadCount > 0
+                ? $"和 VividSoul 聊天 ({unreadCount})"
+                : "和 VividSoul 聊天";
+        }
+
+        private static string BuildConversationStatusSummary(ConversationStatusSnapshot status)
+        {
+            var baseText = $"当前 Provider：{status.ProviderDisplayName} | {FormatProviderType(status.ProviderType)} | {FormatConnectionState(status.ConnectionState)}";
+            if (status.ProviderType == LlmProviderType.OpenClaw)
+            {
+                var sessionText = string.IsNullOrWhiteSpace(status.SessionKey) ? "未绑定 Session" : $"Session: {status.SessionKey}";
+                var agentText = string.IsNullOrWhiteSpace(status.AgentId) ? "Agent: main" : $"Agent: {status.AgentId}";
+                return $"{baseText} | {agentText} | {sessionText}";
+            }
+
+            return baseText;
+        }
+
+        private static string FormatConnectionState(ConversationConnectionState state)
+        {
+            return state switch
+            {
+                ConversationConnectionState.Connected => "已连接",
+                ConversationConnectionState.Connecting => "连接中",
+                ConversationConnectionState.Reconnecting => "重连中",
+                ConversationConnectionState.AuthFailed => "鉴权失败",
+                ConversationConnectionState.Faulted => "异常",
+                _ => "未连接",
+            };
+        }
+
         private static string FormatProviderType(LlmProviderType providerType)
         {
             return providerType switch
@@ -642,6 +720,7 @@ namespace VividSoul.Runtime.App
                 LlmProviderType.Anthropic => "Anthropic",
                 LlmProviderType.Gemini => "Gemini",
                 LlmProviderType.Ollama => "Ollama",
+                LlmProviderType.OpenClaw => "OpenClaw",
                 _ => providerType.ToString(),
             };
         }

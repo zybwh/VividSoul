@@ -8,5 +8,15 @@ namespace VividSoul.Runtime.AI
         LlmProviderType ProviderType,
         string BaseUrl,
         string Model,
-        bool Enabled);
+        bool Enabled,
+        string OpenClawGatewayWsUrl = "",
+        string OpenClawAgentId = "main",
+        OpenClawSessionMode OpenClawSessionMode = OpenClawSessionMode.PerCharacter,
+        string OpenClawSessionKeyTemplate = "",
+        bool OpenClawAutoConnect = true,
+        bool OpenClawAutoReconnect = true,
+        bool OpenClawReceiveProactiveMessages = true,
+        bool OpenClawMirrorTranscriptLocally = true,
+        bool OpenClawEnableBubbleForIncoming = true,
+        bool OpenClawEnableTtsForIncoming = false);
 }

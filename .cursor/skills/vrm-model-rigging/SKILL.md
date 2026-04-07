@@ -190,12 +190,17 @@ Finger chains (first finger NOT connected from Hand, rest connected):
 Eyes (NOT connected):
 - L/R Eye
 
-### Bone placement rules
+### Bone placement rules (CRITICAL — validate in ALL 3 axes)
 
-- **Arms perfectly horizontal**: UpperArm/LowerArm/Hand must share the EXACT same Z coordinate
-- **Legs perfectly vertical**: UpperLeg/LowerLeg/Foot must share the EXACT same X coordinate
+You are doing 3D work with 2D views. **NEVER** assume alignment from one view. Check XYZ explicitly.
+
+- **Arms are a STRAIGHT LINE**: Shoulder → UpperArm → LowerArm → Hand must share the **EXACT same Y AND Z**. Only X changes. Pick one arm_y and one arm_z, use for ALL arm bones.
+- **Legs are a STRAIGHT LINE**: UpperLeg → LowerLeg → Foot must share the **EXACT same X**. Only Z changes (and Y for Foot→Toes).
+- **Spine is a smooth chain in Y**: Y values should transition smoothly, no zigzag.
 - **All rolls = 0.0°** (for VRM 0.x target)
 - **Armature at origin**, identity transform
+
+**Common trap with AI-generated meshes**: Hair/clothing extends into the same X range as arms. When computing "arm center", filter to the arm's Z band (use body-width analysis to find where arms emerge) and IGNORE hair vertices. The arm Z is where body width suddenly doubles.
 
 ### Connection rules
 

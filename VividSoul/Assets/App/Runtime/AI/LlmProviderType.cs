@@ -9,5 +9,6 @@ namespace VividSoul.Runtime.AI
         Gemini = 2,
         Ollama = 3,
         MiniMax = 4,
+        OpenClaw = 5,
     }
 }
