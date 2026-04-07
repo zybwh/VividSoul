@@ -9,22 +9,13 @@ using UnityEngine;
 using UnityEngine.UI;
 using VividSoul.Runtime.AI;
 using VividSoul.Runtime.Avatar;
+using VividSoul.Runtime.Content;
 using VividSoul.Runtime.Settings;
 
 namespace VividSoul.Runtime.App
 {
     public sealed class DesktopPetSettingsWindowPresenter
     {
-        private static readonly string[] FontCandidates =
-        {
-            "PingFang SC",
-            "Hiragino Sans GB",
-            "Microsoft YaHei UI",
-            "Microsoft YaHei",
-            "Arial Unicode MS",
-            "Arial",
-        };
-
         private static readonly Color BackdropColor = new(0f, 0f, 0f, 0f);
         private static readonly Color PanelColor = new(0.10f, 0.13f, 0.18f, 0.98f);
         private static readonly Color HeaderColor = new(0.13f, 0.17f, 0.24f, 1f);
@@ -48,8 +39,6 @@ namespace VividSoul.Runtime.App
         private const float ColumnGap = 18f;
         private const float StandardFieldHeight = 44f;
         private const float StandardSectionSpacing = 16f;
-
-        private static Font? uiFont;
 
         private readonly IAiSecretsStore aiSecretsStore;
         private readonly IAiSettingsStore aiSettingsStore;
@@ -277,6 +266,7 @@ namespace VividSoul.Runtime.App
             header.CloseButton.onClick.AddListener(Hide);
             sidebar.GeneralTabButton.onClick.AddListener(() => ShowTab(SettingsTab.General));
             sidebar.LlmTabButton.onClick.AddListener(() => ShowTab(SettingsTab.Llm));
+            generalContent.ImportButton.onClick.AddListener(runtimeController.OpenLocalModelDialog);
             generalContent.RefreshButton.onClick.AddListener(RefreshManagedModelLibraryList);
             llmContent.AddProviderButton.onClick.AddListener(AddProviderProfile);
             llmContent.RemoveProviderButton.onClick.AddListener(RemoveSelectedProviderProfile);
@@ -752,6 +742,7 @@ namespace VividSoul.Runtime.App
             var librarySection = CreateSectionCard(content, "ModelLibrarySection", "角色库管理");
             CreateHintText(librarySection, "仅显示已导入到角色库的本地角色。删除会移除对应角色文件；当前角色删除后会先卸载。");
             var toolbar = CreateLayoutContainer(librarySection, "Toolbar", isHorizontal: true, 8f, new RectOffset(0, 0, 0, 0), fitToContents: true);
+            var importButton = CreateButton(toolbar, "导入角色", ButtonColor, 40f, 112f);
             var toolbarSpacer = new GameObject("Spacer", typeof(RectTransform), typeof(LayoutElement));
             toolbarSpacer.transform.SetParent(toolbar, false);
             toolbarSpacer.GetComponent<LayoutElement>().flexibleWidth = 1f;
@@ -769,6 +760,7 @@ namespace VividSoul.Runtime.App
                 librarySection,
                 libraryHintText,
                 libraryListRoot,
+                importButton,
                 refreshButton);
         }
 
@@ -780,10 +772,10 @@ namespace VividSoul.Runtime.App
             }
 
             ClearChildren(generalTabUi.LibraryListRoot);
-            var cachedModels = runtimeController.CachedModels
-                .Where(model => runtimeController.CanDeleteManagedLocalModel(model.Path))
+            var managedModels = runtimeController.ManagedLocalModels
+                .Where(model => runtimeController.CanDeleteManagedLocalModel(model.EntryPath))
                 .ToArray();
-            if (!cachedModels.Any())
+            if (!managedModels.Any())
             {
                 pendingDeleteModelPath = string.Empty;
                 generalTabUi.LibraryHintText.text = "当前还没有可管理的导入角色。通过右键菜单里的“添加角色”导入后，这里会自动出现。";
@@ -791,21 +783,21 @@ namespace VividSoul.Runtime.App
                 return;
             }
 
-            if (!cachedModels.Any(model => PathsEqual(model.Path, pendingDeleteModelPath)))
+            if (!managedModels.Any(model => PathsEqual(model.EntryPath, pendingDeleteModelPath)))
             {
                 pendingDeleteModelPath = string.Empty;
             }
 
             generalTabUi.LibraryHintText.text = "点击“删除”后需要再点一次确认，避免误删。";
-            foreach (var cachedModel in cachedModels)
+            foreach (var managedModel in managedModels)
             {
-                CreateManagedModelRow(cachedModel);
+                CreateManagedModelRow(managedModel);
             }
 
             RebuildLayout();
         }
 
-        private void CreateManagedModelRow(CachedModelState cachedModel)
+        private void CreateManagedModelRow(ContentItem managedModel)
         {
             if (generalTabUi == null)
             {
@@ -814,7 +806,7 @@ namespace VividSoul.Runtime.App
 
             var row = CreateLayoutContainer(
                 generalTabUi.LibraryListRoot,
-                $"ModelRow-{cachedModel.DisplayName}",
+                $"ModelRow-{managedModel.Title}",
                 isHorizontal: true,
                 spacing: 12f,
                 padding: new RectOffset(14, 14, 12, 12),
@@ -829,16 +821,16 @@ namespace VividSoul.Runtime.App
             var detailsLayout = detailsColumn.gameObject.AddComponent<LayoutElement>();
             detailsLayout.flexibleWidth = 1f;
 
-            var isCurrentModel = runtimeController.IsCurrentModelPath(cachedModel.Path);
-            var modelExists = File.Exists(cachedModel.Path);
+            var isCurrentModel = runtimeController.IsCurrentModelPath(managedModel.EntryPath);
+            var modelExists = File.Exists(managedModel.EntryPath);
             var title = isCurrentModel
-                ? $"{GetManagedModelDisplayName(cachedModel)}  (当前)"
-                : GetManagedModelDisplayName(cachedModel);
+                ? $"{GetManagedModelDisplayName(managedModel)}  (当前)"
+                : GetManagedModelDisplayName(managedModel);
             var titleText = CreateText(detailsColumn, "Title", title, 16, FontStyle.Bold, TextPrimaryColor, TextAnchor.UpperLeft);
             titleText.horizontalOverflow = HorizontalWrapMode.Wrap;
             titleText.verticalOverflow = VerticalWrapMode.Overflow;
 
-            var directoryPath = runtimeController.GetManagedLocalModelDisplayDirectory(cachedModel.Path);
+            var directoryPath = runtimeController.GetManagedLocalModelDisplayDirectory(managedModel.EntryPath);
             var directoryLabel = modelExists
                 ? $"模型存放目录：{directoryPath}"
                 : $"模型存放目录：{directoryPath}\n当前文件已缺失，但仍可删除这条记录。";
@@ -855,26 +847,54 @@ namespace VividSoul.Runtime.App
                 actionLayoutGroup.childForceExpandWidth = false;
             }
 
-            var isPendingDelete = PathsEqual(cachedModel.Path, pendingDeleteModelPath);
+            var applyButton = CreateButton(
+                actionColumn,
+                isCurrentModel ? "当前使用" : "应用",
+                isCurrentModel ? ButtonActiveColor : ButtonColor,
+                36f,
+                96f);
+            applyButton.interactable = !isCurrentModel && modelExists;
+            applyButton.onClick.AddListener(() => ApplyManagedModel(managedModel));
+
+            var isPendingDelete = PathsEqual(managedModel.EntryPath, pendingDeleteModelPath);
             var deleteButton = CreateButton(actionColumn, isPendingDelete ? "确认删除" : "删除", ButtonDangerColor, 36f, 96f);
-            deleteButton.onClick.AddListener(() => DeleteManagedModel(cachedModel));
+            deleteButton.onClick.AddListener(() => DeleteManagedModel(managedModel));
         }
 
-        private void DeleteManagedModel(CachedModelState cachedModel)
+        private void ApplyManagedModel(ContentItem managedModel)
         {
-            if (!PathsEqual(cachedModel.Path, pendingDeleteModelPath))
+            try
             {
-                pendingDeleteModelPath = cachedModel.Path;
-                statusReporter($"再次点击“确认删除”以移除角色：{cachedModel.DisplayName}");
+                runtimeController.LoadManagedLocalModel(managedModel.EntryPath);
+                pendingDeleteModelPath = string.Empty;
+                statusReporter($"已切换角色：{GetManagedModelDisplayName(managedModel)}");
+                RefreshManagedModelLibraryList();
+            }
+            catch (UserFacingException exception)
+            {
+                statusReporter(exception.Message);
+            }
+            catch (Exception exception)
+            {
+                statusReporter($"切换角色失败：{exception.Message}");
+            }
+        }
+
+        private void DeleteManagedModel(ContentItem managedModel)
+        {
+            if (!PathsEqual(managedModel.EntryPath, pendingDeleteModelPath))
+            {
+                pendingDeleteModelPath = managedModel.EntryPath;
+                statusReporter($"再次点击“确认删除”以移除角色：{GetManagedModelDisplayName(managedModel)}");
                 RefreshManagedModelLibraryList();
                 return;
             }
 
             try
             {
-                runtimeController.DeleteManagedLocalModel(cachedModel.Path);
+                runtimeController.DeleteManagedLocalModel(managedModel.EntryPath);
                 pendingDeleteModelPath = string.Empty;
-                statusReporter($"已删除角色：{cachedModel.DisplayName}");
+                statusReporter($"已删除角色：{GetManagedModelDisplayName(managedModel)}");
                 RefreshManagedModelLibraryList();
             }
             catch (UserFacingException exception)
@@ -885,6 +905,18 @@ namespace VividSoul.Runtime.App
             {
                 statusReporter($"删除角色失败：{exception.Message}");
             }
+        }
+
+        public void ShowGeneral(Canvas canvas)
+        {
+            activeTab = SettingsTab.General;
+            Show(canvas);
+        }
+
+        public void ShowLlm(Canvas canvas)
+        {
+            activeTab = SettingsTab.Llm;
+            Show(canvas);
         }
 
         private LlmTabUi CreateLlmTab(Transform parent)
@@ -1559,17 +1591,14 @@ namespace VividSoul.Runtime.App
             return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string GetManagedModelDisplayName(CachedModelState cachedModel)
+        private static string GetManagedModelDisplayName(ContentItem managedModel)
         {
-            var extension = Path.GetExtension(cachedModel.Path);
-            if (string.IsNullOrWhiteSpace(extension))
+            if (!string.IsNullOrWhiteSpace(managedModel.Title))
             {
-                return cachedModel.DisplayName;
+                return managedModel.Title.Trim();
             }
 
-            return cachedModel.DisplayName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
-                ? cachedModel.DisplayName
-                : $"{cachedModel.DisplayName}{extension}";
+            return Path.GetFileNameWithoutExtension(managedModel.EntryPath);
         }
 
         private static string TryFormatTimestamp(string rawTimestamp)
@@ -1643,23 +1672,7 @@ namespace VividSoul.Runtime.App
 
         private static Font GetUiFont()
         {
-            if (uiFont != null)
-            {
-                return uiFont;
-            }
-
-            foreach (var candidate in FontCandidates)
-            {
-                var fonts = Font.GetOSInstalledFontNames();
-                if (fonts.Any(fontName => string.Equals(fontName, candidate, StringComparison.OrdinalIgnoreCase)))
-                {
-                    uiFont = Font.CreateDynamicFontFromOSFont(candidate, 16);
-                    return uiFont;
-                }
-            }
-
-            uiFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            return uiFont;
+            return RuntimeUiFontResolver.GetFont();
         }
 
         private enum SettingsTab
@@ -1712,6 +1725,7 @@ namespace VividSoul.Runtime.App
                 RectTransform librarySection,
                 Text libraryHintText,
                 RectTransform libraryListRoot,
+                Button importButton,
                 Button refreshButton)
             {
                 Root = root;
@@ -1720,6 +1734,7 @@ namespace VividSoul.Runtime.App
                 LibrarySection = librarySection;
                 LibraryHintText = libraryHintText;
                 LibraryListRoot = libraryListRoot;
+                ImportButton = importButton;
                 RefreshButton = refreshButton;
             }
 
@@ -1734,6 +1749,8 @@ namespace VividSoul.Runtime.App
             public Text LibraryHintText { get; }
 
             public RectTransform LibraryListRoot { get; }
+
+            public Button ImportButton { get; }
 
             public Button RefreshButton { get; }
         }

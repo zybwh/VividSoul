@@ -68,6 +68,11 @@
 - Added a dedicated runtime UI restructure plan to address the growing interaction-shell mismatch between the right-click menu, chat launcher, settings popup, role-library management, and status feedback layers before continuing piecemeal UI fixes.
 - Locked the first runtime-shell direction in the new UI plan: no permanent floating main-entry button, keep a linear right-click menu as the single navigation entry, remove cascading submenus, and route `聊天 / 角色库 / 动作` into one shared main panel instead of continuing to scatter them across buttons, menus, and settings.
 - Refined the new runtime-shell plan after product review: `动作` is no longer treated as a peer user-facing page, but as a Unity-owned predefined action catalog selected by `LLM` or runtime logic via structured intents, with the old action entry expected to be replaced by a low-frequency `动作管理 / 注册` surface.
+- Added typography and UI-asset direction to the runtime-shell plan: stop treating `Modern UI Pack` as a long-term visual dependency, prefer self-controlled runtime visuals, and standardize on calling system-installed fonts for display instead of bundling system font files into the app.
+- Unified runtime UI font resolution across `DesktopPetRuntimeHud`, chat, settings, and speech bubbles via a shared system-font resolver so the menu and status text now follow the same `PingFang SC` / `微软雅黑`-first display strategy as the newer UI surfaces instead of falling back to `Arial` by default.
+- Started executing the runtime-shell restructure plan in code: the standalone chat launcher is no longer the default runtime entry, the right-click menu now surfaces `角色库` as a first-level command instead of a submenu, and the settings-side role-library view now consumes the real managed model library with import/apply/delete actions instead of the old recent-cache list.
+- Removed the obsolete right-click `随机走动` and `应用示例移动行为` commands now that they no longer fit the new runtime-shell direction and are no longer considered user-facing entry points.
+- Added a dedicated local-agent planning document for pure `OpenAI-compatible / MiniMax` style provider paths, fixing the design split between `Soul`, layered `Memory`, and durable `heartbeat/reminder` scheduling while explicitly keeping this work separate from the current `OpenClaw` transport integration.
 
 ## Known Issues
 
@@ -88,3 +93,7 @@
 - Continue reducing root-level clutter by keeping all future downloads, exports, and screenshots inside their dedicated directories.
 - Turn the locked runtime interaction-shell plan into a concrete implementation breakdown, especially the unified main panel container, the first-pass right-click menu item set, and the migration path for removing the standalone chat launcher and submenu-based role/action lists.
 - Define the first constrained `LLM -> ActionIntent -> Unity ActionDispatcher` contract so the future chat flow can trigger only pre-registered actions while the user-facing shell continues to simplify.
+- Unify the remaining runtime UI text surfaces onto the same system-font resolution path so menus, settings, chat, and speech bubbles stop mixing `Arial` fallback-only behavior with platform-native font selection.
+- Continue replacing the remaining `Modern UI Pack` hard dependencies, starting with the runtime context-menu prefab path and speech-bubble shadow asset, now that font selection is no longer coupled to the old pack defaults.
+- Continue the runtime-shell migration by replacing the remaining role/action submenu flows with the planned unified main-panel structure, now that the first bridge step away from launcher-plus-submenu navigation is in place.
+- Turn the new local-agent `Soul / Memory / Heartbeat` plan into an implementation breakdown for the pure local-provider path, especially the markdown-first memory storage layout, hidden thread compaction pipeline, and restart-safe reminder scheduler.

@@ -47,7 +47,6 @@ namespace VividSoul.Runtime.App
 
         private MenuUi? contextMenuUi;
         private ContextMenuSubmenu currentSubmenu = ContextMenuSubmenu.None;
-        private Font? menuFont;
         private int menuSessionId;
         private bool ownsEventSystem;
         private DesktopPetRuntimeController? runtimeController;
@@ -78,7 +77,7 @@ namespace VividSoul.Runtime.App
                 () => runtimeController?.MarkConversationMessagesRead());
             settingsWindowPresenter = new DesktopPetSettingsWindowPresenter(runtimeController!, ShowStatusMessage);
             EnsureCanvasExists();
-            chatOverlayPresenter.Show(uiCanvas!);
+            chatOverlayPresenter.Attach(uiCanvas!);
         }
 
         private void OnEnable()
@@ -92,7 +91,7 @@ namespace VividSoul.Runtime.App
             }
 
             EnsureCanvasExists();
-            chatOverlayPresenter?.Show(uiCanvas!);
+            chatOverlayPresenter?.Attach(uiCanvas!);
         }
 
         private void Update()
@@ -156,6 +155,7 @@ namespace VividSoul.Runtime.App
             speechBubblePresenter?.HideImmediate();
             chatOverlayPresenter?.Hide();
             settingsWindowPresenter?.Hide();
+            chatOverlayPresenter?.Dispose();
             settingsWindowPresenter?.Dispose();
 
             if (uiCanvas != null)
@@ -290,24 +290,18 @@ namespace VividSoul.Runtime.App
             }
 
             ClearChildren(contextMenuUi.ItemList);
+            var chatLabel = chatOverlayPresenter != null && chatOverlayPresenter.UnreadCount > 0
+                ? $"聊天 ({chatOverlayPresenter.UnreadCount})"
+                : "聊天";
+            CreateMenuButton(contextMenuUi.ItemList, chatLabel, closeMenusOnClick: true, onClick: OpenChatOverlay);
+            CreateMenuButton(contextMenuUi.ItemList, "角色库", closeMenusOnClick: true, onClick: OpenRoleLibrary);
             CreateMenuButton(contextMenuUi.ItemList, "添加角色", closeMenusOnClick: true, onClick: () =>
             {
                 runtimeController.OpenLocalModelDialog();
             });
-            CreateSubmenuButton(contextMenuUi.ItemList, "角色库", ContextMenuSubmenu.ReplaceCharacter);
-            CreateSubmenuButton(contextMenuUi.ItemList, "姿势选择", ContextMenuSubmenu.PoseSelection);
             CreateDisabledMenuButton(contextMenuUi.ItemList, "更换服装");
             CreateDisabledMenuButton(contextMenuUi.ItemList, "创意工坊");
-            CreateMenuButton(contextMenuUi.ItemList, "聊天", closeMenusOnClick: true, onClick: OpenChatOverlay);
             CreateMenuButton(contextMenuUi.ItemList, "设置", closeMenusOnClick: true, onClick: OpenSettingsWindow);
-            CreateMenuButton(contextMenuUi.ItemList, "随机走动", closeMenusOnClick: true, onClick: () =>
-            {
-                runtimeController.MoveToSampledDesktopLocation();
-            });
-            CreateMenuButton(contextMenuUi.ItemList, "应用示例移动行为", closeMenusOnClick: true, onClick: () =>
-            {
-                runtimeController.ApplyExampleDesktopMoveBehavior();
-            });
             var exitButton = CreateMenuButton(contextMenuUi.ItemList, "退出", closeMenusOnClick: false, onClick: () =>
             {
                 runtimeController.QuitApplication();
@@ -633,7 +627,20 @@ namespace VividSoul.Runtime.App
             EnsureCanvasExists();
             runtimeController.RequestApplicationFocus();
             chatOverlayPresenter?.Collapse();
-            settingsWindowPresenter.Show(uiCanvas!);
+            settingsWindowPresenter.ShowLlm(uiCanvas!);
+        }
+
+        private void OpenRoleLibrary()
+        {
+            if (settingsWindowPresenter == null || runtimeController == null)
+            {
+                return;
+            }
+
+            EnsureCanvasExists();
+            runtimeController.RequestApplicationFocus();
+            chatOverlayPresenter?.Collapse();
+            settingsWindowPresenter.ShowGeneral(uiCanvas!);
         }
 
         private void OpenChatOverlay()
@@ -647,7 +654,6 @@ namespace VividSoul.Runtime.App
             runtimeController.RequestApplicationFocus();
             settingsWindowPresenter?.Hide();
             chatOverlayPresenter.Show(uiCanvas!);
-            chatOverlayPresenter.Expand();
             runtimeController.MarkConversationMessagesRead();
             _ = runtimeController.RefreshConversationBackendAsync();
         }
@@ -988,8 +994,7 @@ namespace VividSoul.Runtime.App
 
         private Font GetMenuFont()
         {
-            menuFont ??= Resources.GetBuiltinResource<Font>("Arial.ttf");
-            return menuFont;
+            return RuntimeUiFontResolver.GetFont();
         }
 
         private void UpdateSubmenuCloseTimer(Vector2 mousePosition)

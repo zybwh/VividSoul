@@ -10,16 +10,6 @@ namespace VividSoul.Runtime.App
 {
     public sealed class DesktopPetSpeechBubblePresenter
     {
-        private static readonly string[] BubbleFontCandidates =
-        {
-            "PingFang SC",
-            "Hiragino Sans GB",
-            "Microsoft YaHei UI",
-            "Microsoft YaHei",
-            "Arial Unicode MS",
-            "Arial",
-        };
-
         private const string BubbleShadowSpritePath = "Modern UI Pack/Textures/Shadow/Radial Shadow";
         private const float BubbleMaxTextWidth = 440f;
         private const float BubbleMinBodyWidth = 228f;
@@ -69,7 +59,6 @@ namespace VividSoul.Runtime.App
         private static readonly Color BubbleShadowColor = new(0.32f, 0.18f, 0.28f, 0.16f);
         private static readonly Color BubbleTextColor = new(0.42f, 0.24f, 0.38f, 1f);
 
-        private static Font? bubbleFont;
         private static Sprite? bubbleFallbackSprite;
         private static Sprite? bubbleShadowSprite;
         private static readonly Dictionary<int, Sprite> circleSpriteCache = new();
@@ -1037,10 +1026,7 @@ namespace VividSoul.Runtime.App
 
         private static Font GetBubbleFont()
         {
-            bubbleFont ??= Font.CreateDynamicFontFromOSFont(BubbleFontCandidates, BubbleFontSize);
-            return bubbleFont != null
-                ? bubbleFont
-                : Resources.GetBuiltinResource<Font>("Arial.ttf");
+            return RuntimeUiFontResolver.GetFont(BubbleFontSize);
         }
 
         private static Sprite GetBubbleShadowSprite()

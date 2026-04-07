@@ -12,18 +12,6 @@ namespace VividSoul.Runtime.App
 {
     public sealed class DesktopPetChatOverlayPresenter
     {
-        private static readonly string[] FontCandidates =
-        {
-            "PingFang SC",
-            "Hiragino Sans GB",
-            "Microsoft YaHei UI",
-            "Microsoft YaHei",
-            "Arial Unicode MS",
-            "Arial",
-        };
-
-        private static readonly Color LauncherColor = new(0.10f, 0.15f, 0.22f, 0.96f);
-        private static readonly Color LauncherBorderColor = new(0.30f, 0.43f, 0.58f, 0.95f);
         private static readonly Color PanelColor = new(0.10f, 0.14f, 0.20f, 0.98f);
         private static readonly Color PanelBorderColor = new(0.29f, 0.38f, 0.50f, 1f);
         private static readonly Color HeaderColor = new(0.12f, 0.17f, 0.24f, 1f);
@@ -38,8 +26,6 @@ namespace VividSoul.Runtime.App
         private static readonly Color TextSecondaryColor = new(0.73f, 0.80f, 0.88f, 1f);
         private static readonly Color TextMutedColor = new(0.56f, 0.63f, 0.72f, 1f);
 
-        private const float LauncherWidth = 300f;
-        private const float LauncherHeight = 56f;
         private const float PanelWidth = 520f;
         private const float PanelHeight = 560f;
         private const float ScreenMargin = 26f;
@@ -48,8 +34,6 @@ namespace VividSoul.Runtime.App
         private const float SystemBubbleWidth = 420f;
         private const float SettingsRefreshIntervalSeconds = 1.2f;
         private const int UiFontSize = 16;
-
-        private static Font? uiFont;
 
         private readonly Action<string> onUserMessageSubmitted;
         private readonly Action? onExpanded;
@@ -79,6 +63,19 @@ namespace VividSoul.Runtime.App
             && chatUi.Root.gameObject.activeSelf
             && chatUi.PanelRoot.gameObject.activeSelf;
 
+        public int UnreadCount => unreadCount;
+
+        public void Attach(Canvas canvas)
+        {
+            if (canvas == null)
+            {
+                throw new ArgumentNullException(nameof(canvas));
+            }
+
+            EnsureUi(canvas);
+            SetExpanded(false, focusInput: false);
+        }
+
         public void Show(Canvas canvas)
         {
             if (canvas == null)
@@ -87,10 +84,7 @@ namespace VividSoul.Runtime.App
             }
 
             EnsureUi(canvas);
-            chatUi!.Root.gameObject.SetActive(true);
-            SetExpanded(isExpanded, focusInput: false);
-            RefreshProviderSummary();
-            RefreshSendButtonState();
+            Expand();
         }
 
         public void Hide()
@@ -101,6 +95,10 @@ namespace VividSoul.Runtime.App
             }
 
             chatUi.Root.gameObject.SetActive(false);
+        }
+
+        public void Dispose()
+        {
         }
 
         public void Update(float deltaTime)
@@ -174,7 +172,6 @@ namespace VividSoul.Runtime.App
                 unreadCount = 0;
             }
 
-            UpdateLauncherLabel();
             ApplyProviderSummaryText();
         }
 
@@ -194,14 +191,10 @@ namespace VividSoul.Runtime.App
             var root = rootObject.GetComponent<RectTransform>();
             root.SetParent(canvas.transform, false);
             StretchRect(root);
-
-            var launcherButton = CreateLauncher(root);
             var panelRoot = CreatePanel(root, out var providerSummaryText, out var historyScrollRect, out var historyContent, out var inputField, out var sendButton, out var clearButton, out var collapseButton);
 
             chatUi = new ChatOverlayUi(
                 root,
-                launcherButton,
-                FindRequiredText(launcherButton.transform),
                 panelRoot,
                 providerSummaryText,
                 historyScrollRect,
@@ -212,7 +205,6 @@ namespace VividSoul.Runtime.App
                 clearButton,
                 collapseButton);
 
-            launcherButton.onClick.AddListener(Expand);
             sendButton.onClick.AddListener(TrySubmitInput);
             clearButton.onClick.AddListener(ClearHistory);
             collapseButton.onClick.AddListener(Collapse);
@@ -221,42 +213,6 @@ namespace VividSoul.Runtime.App
 
             SetExpanded(false, focusInput: false);
             AppendSystemMessage("聊天交互面板已接通。配置有效时，发送内容会直接请求当前激活的 LLM Provider。");
-        }
-
-        private Button CreateLauncher(Transform parent)
-        {
-            var buttonObject = new GameObject(
-                "Launcher",
-                typeof(RectTransform),
-                typeof(Image),
-                typeof(Button),
-                typeof(LayoutElement));
-            var rect = buttonObject.GetComponent<RectTransform>();
-            rect.SetParent(parent, false);
-            rect.anchorMin = new Vector2(1f, 0f);
-            rect.anchorMax = new Vector2(1f, 0f);
-            rect.pivot = new Vector2(1f, 0f);
-            rect.anchoredPosition = new Vector2(-ScreenMargin, ScreenMargin);
-            rect.sizeDelta = new Vector2(LauncherWidth, LauncherHeight);
-
-            var image = buttonObject.GetComponent<Image>();
-            image.color = LauncherColor;
-
-            var outline = buttonObject.AddComponent<Outline>();
-            outline.effectColor = LauncherBorderColor;
-            outline.effectDistance = new Vector2(1f, -1f);
-
-            var button = buttonObject.GetComponent<Button>();
-            button.transition = Selectable.Transition.ColorTint;
-            button.targetGraphic = image;
-            button.navigation = new Navigation { mode = Navigation.Mode.None };
-            button.colors = CreateButtonColors(LauncherColor);
-
-            var label = CreateText(buttonObject.transform, "Label", "和 VividSoul 聊天", 18, FontStyle.Bold, TextPrimaryColor, TextAnchor.MiddleCenter);
-            StretchRect(label.rectTransform);
-            label.horizontalOverflow = HorizontalWrapMode.Overflow;
-            label.verticalOverflow = VerticalWrapMode.Truncate;
-            return button;
         }
 
         private RectTransform CreatePanel(
@@ -461,10 +417,9 @@ namespace VividSoul.Runtime.App
                 return;
             }
 
-            chatUi.LauncherButton.gameObject.SetActive(!expanded);
+            chatUi.Root.gameObject.SetActive(expanded);
             chatUi.PanelRoot.gameObject.SetActive(expanded);
             chatUi.Root.SetAsLastSibling();
-            UpdateLauncherLabel();
             if (expanded)
             {
                 if (!wasExpanded)
@@ -545,7 +500,6 @@ namespace VividSoul.Runtime.App
             if (!isExpanded && role == MessageRole.Mate)
             {
                 unreadCount++;
-                UpdateLauncherLabel();
             }
         }
 
@@ -671,18 +625,6 @@ namespace VividSoul.Runtime.App
                 ? " | 正在请求回复..."
                 : " | 已接通真实聊天调用";
             chatUi.ProviderSummaryText.text = $"{providerSummaryBaseText}{suffix}";
-        }
-
-        private void UpdateLauncherLabel()
-        {
-            if (chatUi == null)
-            {
-                return;
-            }
-
-            chatUi.LauncherLabel.text = unreadCount > 0
-                ? $"和 VividSoul 聊天 ({unreadCount})"
-                : "和 VividSoul 聊天";
         }
 
         private static string BuildConversationStatusSummary(ConversationStatusSnapshot status)
@@ -889,8 +831,7 @@ namespace VividSoul.Runtime.App
 
         private static Font GetUiFont()
         {
-            uiFont ??= Font.CreateDynamicFontFromOSFont(FontCandidates, UiFontSize);
-            return uiFont ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+            return RuntimeUiFontResolver.GetFont(UiFontSize);
         }
 
         private static void ClearChildren(RectTransform parent)
@@ -929,8 +870,6 @@ namespace VividSoul.Runtime.App
         {
             public ChatOverlayUi(
                 RectTransform root,
-                Button launcherButton,
-                Text launcherLabel,
                 RectTransform panelRoot,
                 Text providerSummaryText,
                 ScrollRect historyScrollRect,
@@ -942,8 +881,6 @@ namespace VividSoul.Runtime.App
                 Button collapseButton)
             {
                 Root = root;
-                LauncherButton = launcherButton;
-                LauncherLabel = launcherLabel;
                 PanelRoot = panelRoot;
                 ProviderSummaryText = providerSummaryText;
                 HistoryScrollRect = historyScrollRect;
@@ -956,10 +893,6 @@ namespace VividSoul.Runtime.App
             }
 
             public RectTransform Root { get; }
-
-            public Button LauncherButton { get; }
-
-            public Text LauncherLabel { get; }
 
             public RectTransform PanelRoot { get; }
 

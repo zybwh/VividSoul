@@ -38,7 +38,6 @@ namespace VividSoul.Runtime.App
         private const string DefaultBuiltInPoseId = "vrma_01";
         private const string StartupAnimationDirectoryEnvironmentVariable = "VIVIDSOUL_LOCAL_VRMA_DIR";
         private const string StartupAnimationFileEnvironmentVariable = "VIVIDSOUL_LOCAL_VRMA_PATH";
-        private const string ExampleDesktopMoveBehaviorRelativePath = "Defaults/Behavior/example_desktop_move/behavior.json";
         private const float ConversationAmbientPoseSuppressionSeconds = 18f;
 
         private static readonly BuiltInPoseOption[] BuiltInPoseOptions =
@@ -120,6 +119,8 @@ namespace VividSoul.Runtime.App
         public IReadOnlyList<CachedModelState> CachedModels => cachedModelStore != null
             ? cachedModelStore.Load()
             : Array.Empty<CachedModelState>();
+
+        public IReadOnlyList<ContentItem> ManagedLocalModels => GetManagedLocalModels();
 
         public IReadOnlyList<WorkshopContentItem> WorkshopContent => workshopContent;
 
@@ -300,20 +301,6 @@ namespace VividSoul.Runtime.App
             }
         }
 
-        [ContextMenu("Apply Example Desktop Move Behavior (StreamingAssets)")]
-        public async void ApplyExampleDesktopMoveBehavior()
-        {
-            try
-            {
-                EnsureServices();
-                await ApplyLocalBehaviorManifestAsync(GetExampleDesktopMoveBehaviorPath());
-            }
-            catch (Exception exception)
-            {
-                ReportFailure(exception);
-            }
-        }
-
         [ContextMenu("Restore Last Selected Model")]
         public async void RestoreLastSelectedModel()
         {
@@ -410,6 +397,22 @@ namespace VividSoul.Runtime.App
             {
                 ReportFailure(exception);
             }
+        }
+
+        public void LoadManagedLocalModel(string path)
+        {
+            LoadCachedModel(path);
+        }
+
+        public IReadOnlyList<ContentItem> GetManagedLocalModels()
+        {
+            EnsureServices();
+
+            return contentCatalog!
+                .Scan(modelLibraryPaths!.RootPath, ContentSource.Local)
+                .Where(item => item.Type == ContentType.Model)
+                .OrderBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
 
         public bool CanDeleteManagedLocalModel(string path)
@@ -709,44 +712,6 @@ namespace VividSoul.Runtime.App
             {
                 ReportFailure(exception);
             }
-        }
-
-        [ContextMenu("Move To Sampled Desktop Location")]
-        public async void MoveToSampledDesktopLocation()
-        {
-            try
-            {
-                var movementController = GetMovementController();
-                if (!movementController.HasConfiguredMovementAnimation)
-                {
-                    await ApplyLocalBehaviorManifestAsync(GetExampleDesktopMoveBehaviorPath());
-                    movementController = GetMovementController();
-                }
-
-                if (!movementController.HasConfiguredMovementLoopAnimation)
-                {
-                    throw new InvalidOperationException(
-                        "Movement behavior is active, but no loop VRMA was resolved for movement.");
-                }
-
-                await movementController.MoveToSampledPointAsync();
-            }
-            catch (Exception exception)
-            {
-                ReportFailure(exception);
-            }
-        }
-
-        private static string GetExampleDesktopMoveBehaviorPath()
-        {
-            var path = Path.GetFullPath(
-                Path.Combine(Application.streamingAssetsPath, ExampleDesktopMoveBehaviorRelativePath));
-            if (!File.Exists(path))
-            {
-                throw new FileNotFoundException("Example behavior manifest was not found.", path);
-            }
-
-            return path;
         }
 
         [ContextMenu("Clear Selected Model")]
