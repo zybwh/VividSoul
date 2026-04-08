@@ -4,8 +4,8 @@ namespace VividSoul.Runtime.AI
 {
     public sealed class MiniMaxLlmProvider : OpenAiCompatibleLlmProvider
     {
-        public MiniMaxLlmProvider()
-            : base(LlmProviderType.MiniMax, true)
+        public MiniMaxLlmProvider(bool enableReasoningSplit = true)
+            : base(LlmProviderType.MiniMax, enableReasoningSplit)
         {
         }
     }

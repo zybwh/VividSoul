@@ -7,5 +7,6 @@ namespace VividSoul.Runtime.AI
         bool IsProactive,
         bool ShouldDisplayBubble,
         bool ShouldSpeak,
-        bool IsOptimistic);
+        bool IsOptimistic,
+        ConversationActionRequest? ActionRequest = null);
 }

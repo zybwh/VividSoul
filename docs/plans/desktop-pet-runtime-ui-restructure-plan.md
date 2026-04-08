@@ -446,6 +446,12 @@
 - 为聊天链路增加结构化 `LlmActionIntent`
 - 建立低频但正式存在的 `动作管理` 页面替代当前动作按钮与测试入口
 
+当前进度：
+
+- 已将运行时内置 pose 元数据收敛到共享 `ActionCatalog` 形态，避免聊天链路和设置页各自维护一份动作清单。
+- 本地 provider 聊天链路已接入第一版强制 tool-call `ActionIntentJudge`，只允许模型在 `noAction` 与“选择一个内置 pose id”之间做受控决策。
+- `DesktopPetRuntimeHud` 已补出最小 `ActionDispatcher`，收到结构化动作后只会路由到预定义的内置 pose 播放入口，不会暴露任意运行时方法调用。
+
 完成标准：
 
 - `LLM` 只能选择预定义动作

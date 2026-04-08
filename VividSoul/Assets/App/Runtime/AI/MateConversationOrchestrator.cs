@@ -22,6 +22,7 @@ namespace VividSoul.Runtime.AI
         private readonly ILlmProvider openAiCompatibleProvider;
         private readonly ILlmProvider miniMaxProvider;
         private readonly SoulProfileStore soulProfileStore;
+        private readonly ReminderStore reminderStore;
         private readonly SoulPromptAssembler soulPromptAssembler;
         private readonly MemoryJudge memoryJudge;
 
@@ -31,7 +32,9 @@ namespace VividSoul.Runtime.AI
             IChatSessionStore chatSessionStore,
             ILlmUsageStatsStore llmUsageStatsStore,
             ModelFingerprintService modelFingerprintService,
-            SoulPromptAssembler? soulPromptAssembler = null)
+            SoulPromptAssembler? soulPromptAssembler = null,
+            SoulProfileStore? soulProfileStore = null,
+            ReminderStore? reminderStore = null)
         {
             this.aiSettingsStore = aiSettingsStore ?? throw new ArgumentNullException(nameof(aiSettingsStore));
             this.aiSecretsStore = aiSecretsStore ?? throw new ArgumentNullException(nameof(aiSecretsStore));
@@ -40,8 +43,9 @@ namespace VividSoul.Runtime.AI
             this.modelFingerprintService = modelFingerprintService ?? throw new ArgumentNullException(nameof(modelFingerprintService));
             openAiCompatibleProvider = new OpenAiCompatibleLlmProvider();
             miniMaxProvider = new MiniMaxLlmProvider();
-            this.soulProfileStore = new SoulProfileStore();
-            this.soulPromptAssembler = soulPromptAssembler ?? new SoulPromptAssembler(this.soulProfileStore);
+            this.soulProfileStore = soulProfileStore ?? new SoulProfileStore();
+            this.reminderStore = reminderStore ?? new ReminderStore();
+            this.soulPromptAssembler = soulPromptAssembler ?? new SoulPromptAssembler(this.soulProfileStore, this.reminderStore);
             memoryJudge = new MemoryJudge(openAiCompatibleProvider, miniMaxProvider, this.soulProfileStore);
         }
 
@@ -49,6 +53,7 @@ namespace VividSoul.Runtime.AI
             string characterSourcePath,
             string characterDisplayName,
             string userMessage,
+            string supplementalInstruction = "",
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(characterSourcePath))
@@ -78,7 +83,8 @@ namespace VividSoul.Runtime.AI
             var systemPrompt = soulPromptAssembler.BuildSystemPrompt(
                 settings.GlobalSystemPrompt,
                 characterDisplayName,
-                modelFingerprint);
+                modelFingerprint,
+                supplementalInstruction);
             var requestContext = new LlmRequestContext(
                 ProviderProfile: activeProvider,
                 ApiKey: apiKey,
@@ -117,15 +123,14 @@ namespace VividSoul.Runtime.AI
                     stopwatch.ElapsedMilliseconds,
                     response.PromptCharacters,
                     response.CompletionCharacters);
-                await TryWriteMemoriesAsync(
+                QueueMemoryWrite(
                     activeProvider,
                     apiKey,
                     characterDisplayName,
                     modelFingerprint,
                     savedSession.ActiveThreadId,
-                    userChatMessage,
-                    assistantMessage,
-                    cancellationToken);
+                    userChatMessage.Text,
+                    string.IsNullOrWhiteSpace(response.TtsText) ? assistantMessage.Text : response.TtsText);
                 return response;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -322,8 +327,8 @@ namespace VividSoul.Runtime.AI
             string characterDisplayName,
             string characterFingerprint,
             string activeThreadId,
-            ChatMessage userChatMessage,
-            ChatMessage assistantMessage,
+            string userMessage,
+            string assistantReplyText,
             CancellationToken cancellationToken)
         {
             try
@@ -333,8 +338,8 @@ namespace VividSoul.Runtime.AI
                     apiKey,
                     characterDisplayName,
                     characterFingerprint,
-                    userChatMessage.Text,
-                    assistantMessage.Text,
+                    userMessage,
+                    assistantReplyText,
                     activeThreadId,
                     cancellationToken);
                 soulProfileStore.ApplyMemoryWrites(characterFingerprint, characterDisplayName, writes);
@@ -345,6 +350,26 @@ namespace VividSoul.Runtime.AI
             catch
             {
             }
+        }
+
+        private void QueueMemoryWrite(
+            LlmProviderProfile activeProvider,
+            string apiKey,
+            string characterDisplayName,
+            string characterFingerprint,
+            string activeThreadId,
+            string userMessage,
+            string assistantReplyText)
+        {
+            _ = TryWriteMemoriesAsync(
+                activeProvider,
+                apiKey,
+                characterDisplayName,
+                characterFingerprint,
+                activeThreadId,
+                userMessage,
+                assistantReplyText,
+                CancellationToken.None);
         }
     }
 }

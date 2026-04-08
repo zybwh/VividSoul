@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEngine;
@@ -13,12 +14,16 @@ namespace VividSoul.Runtime.AI
         private const string UserDirectoryName = "user";
         private const string CharactersDirectoryName = "characters";
         private const string HabitsFileName = "habits.md";
+        private const string HabitCandidatesFileName = "habit-candidates.json";
         private const string UserFactsFileName = "user-facts.md";
         private const string RoleFileName = "role.md";
         private const string BondFileName = "bond.md";
         private const string CharacterFactsFileName = "facts.md";
+        private const int HabitCandidatePromotionCount = 2;
+        private const double HabitCandidatePromotionAverageConfidence = 0.68d;
 
         private readonly string rootDirectoryPath;
+        private readonly object writeGate = new();
 
         public SoulProfileStore(string? baseDirectory = null)
         {
@@ -79,16 +84,19 @@ namespace VividSoul.Runtime.AI
         public void ApplyMemoryWrites(
             string characterFingerprint,
             string characterDisplayName,
-            System.Collections.Generic.IReadOnlyList<MemoryWriteEntry> writes)
+            IReadOnlyList<MemoryWriteEntry> writes)
         {
             if (writes == null || writes.Count == 0)
             {
                 return;
             }
 
-            foreach (var write in writes)
+            lock (writeGate)
             {
-                ApplyMemoryWrite(characterFingerprint, characterDisplayName, write);
+                foreach (var write in writes)
+                {
+                    ApplyMemoryWrite(characterFingerprint, characterDisplayName, write);
+                }
             }
         }
 
@@ -105,49 +113,24 @@ namespace VividSoul.Runtime.AI
                 return;
             }
 
-            switch (write.MemoryType)
+            var managedFiles = BuildManagedMemoryFiles(characterFingerprint, characterDisplayName);
+            var target = ResolveWriteTarget(write, managedFiles, characterFingerprint, characterDisplayName);
+            if (target == null)
             {
-                case "explicitOverride":
-                case "explicitPreference":
-                    if (string.Equals(write.Scope, "user", StringComparison.OrdinalIgnoreCase))
-                    {
-                        UpsertBullet(Path.Combine(rootDirectoryPath, UserDirectoryName, HabitsFileName), "## Stable Preferences", normalizedText, write.Replaces, BuildHabitsTemplate());
-                    }
+                if (string.Equals(write.MemoryType, "inferredHabitCandidate", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(write.Scope, "user", StringComparison.OrdinalIgnoreCase))
+                {
+                    RecordHabitCandidate(normalizedText, write.Confidence, write.SourceThreadId);
+                }
 
-                    break;
-                case "stableFact":
-                    if (string.Equals(write.Scope, "user", StringComparison.OrdinalIgnoreCase))
-                    {
-                        UpsertBullet(Path.Combine(rootDirectoryPath, UserDirectoryName, UserFactsFileName), "## Stable Facts", normalizedText, write.Replaces, BuildUserFactsTemplate());
-                    }
-                    else if (string.Equals(write.Scope, "character", StringComparison.OrdinalIgnoreCase))
-                    {
-                        UpsertBullet(
-                            Path.Combine(rootDirectoryPath, CharactersDirectoryName, ToSafeDirectoryName(characterFingerprint), "memory", CharacterFactsFileName),
-                            "## Stable Facts",
-                            normalizedText,
-                            write.Replaces,
-                            BuildCharacterFactsTemplate(characterDisplayName));
-                    }
-
-                    break;
-                case "bondUpdate":
-                    UpsertBullet(
-                        Path.Combine(rootDirectoryPath, CharactersDirectoryName, ToSafeDirectoryName(characterFingerprint), BondFileName),
-                        "## Relationship",
-                        normalizedText,
-                        write.Replaces,
-                        BuildBondTemplate(characterDisplayName));
-                    break;
-                case "openCommitment":
-                    UpsertBullet(
-                        Path.Combine(rootDirectoryPath, CharactersDirectoryName, ToSafeDirectoryName(characterFingerprint), BondFileName),
-                        "## Open Threads",
-                        normalizedText,
-                        write.Replaces,
-                        BuildBondTemplate(characterDisplayName));
-                    break;
+                return;
             }
+
+            RemoveMatchingBulletFromFiles(managedFiles, write.Replaces);
+            RemoveMatchingBulletFromFiles(managedFiles, normalizedText);
+            RemoveMatchingHabitCandidate(write.Replaces);
+            RemoveMatchingHabitCandidate(normalizedText);
+            UpsertBullet(target.FilePath, target.SectionHeading, normalizedText, target.InitialContent);
         }
 
         private static void EnsureFileExists(string filePath, string initialContent)
@@ -341,23 +324,242 @@ namespace VividSoul.Runtime.AI
             return string.IsNullOrWhiteSpace(normalized) ? "default-character" : normalized;
         }
 
-        private static void UpsertBullet(string filePath, string sectionHeading, string bulletText, string? replaces, string initialContent)
+        private MemoryWriteTarget? ResolveWriteTarget(
+            MemoryWriteEntry write,
+            IReadOnlyList<ManagedMemoryFile> managedFiles,
+            string characterFingerprint,
+            string characterDisplayName)
+        {
+            if (string.Equals(write.MemoryType, "explicitOverride", StringComparison.OrdinalIgnoreCase))
+            {
+                var existingTarget = FindMatchingBulletTarget(managedFiles, write.Replaces);
+                if (existingTarget != null)
+                {
+                    return existingTarget;
+                }
+            }
+
+            return write.MemoryType switch
+            {
+                "explicitOverride" or "explicitPreference" when string.Equals(write.Scope, "user", StringComparison.OrdinalIgnoreCase)
+                    => new MemoryWriteTarget(
+                        Path.Combine(rootDirectoryPath, UserDirectoryName, HabitsFileName),
+                        "## Stable Preferences",
+                        BuildHabitsTemplate()),
+                "explicitOverride" or "stableFact" when string.Equals(write.Scope, "user", StringComparison.OrdinalIgnoreCase)
+                    => new MemoryWriteTarget(
+                        Path.Combine(rootDirectoryPath, UserDirectoryName, UserFactsFileName),
+                        "## Stable Facts",
+                        BuildUserFactsTemplate()),
+                "explicitOverride" or "stableFact" when string.Equals(write.Scope, "character", StringComparison.OrdinalIgnoreCase)
+                    => new MemoryWriteTarget(
+                        Path.Combine(rootDirectoryPath, CharactersDirectoryName, ToSafeDirectoryName(characterFingerprint), "memory", CharacterFactsFileName),
+                        "## Stable Facts",
+                        BuildCharacterFactsTemplate(characterDisplayName)),
+                "explicitOverride" or "bondUpdate" when string.Equals(write.Scope, "bond", StringComparison.OrdinalIgnoreCase)
+                    => new MemoryWriteTarget(
+                        Path.Combine(rootDirectoryPath, CharactersDirectoryName, ToSafeDirectoryName(characterFingerprint), BondFileName),
+                        "## Relationship",
+                        BuildBondTemplate(characterDisplayName)),
+                "openCommitment" when string.Equals(write.Scope, "bond", StringComparison.OrdinalIgnoreCase)
+                    => new MemoryWriteTarget(
+                        Path.Combine(rootDirectoryPath, CharactersDirectoryName, ToSafeDirectoryName(characterFingerprint), BondFileName),
+                        "## Open Threads",
+                        BuildBondTemplate(characterDisplayName)),
+                _ => null,
+            };
+        }
+
+        private void RecordHabitCandidate(string bulletText, double confidence, string sourceThreadId)
+        {
+            var filePath = Path.Combine(rootDirectoryPath, UserDirectoryName, HabitCandidatesFileName);
+            EnsureFileExists(filePath, BuildHabitCandidatesInitialContent());
+
+            var current = LoadHabitCandidatePool(filePath);
+            var comparisonKey = BuildComparisonValue(bulletText);
+            if (string.IsNullOrWhiteSpace(comparisonKey))
+            {
+                return;
+            }
+
+            var matchedCandidate = current.Items
+                .FirstOrDefault(item => string.Equals(item.ComparisonKey, comparisonKey, StringComparison.Ordinal));
+            if (matchedCandidate == null)
+            {
+                matchedCandidate = new HabitCandidateItem();
+                current.Items.Add(matchedCandidate);
+            }
+
+            matchedCandidate.Text = bulletText;
+            matchedCandidate.ComparisonKey = comparisonKey;
+            matchedCandidate.Occurrences = Math.Max(0, matchedCandidate.Occurrences) + 1;
+            matchedCandidate.ConfidenceSum += (float)Math.Max(0d, confidence);
+            matchedCandidate.MaxConfidence = Math.Max(matchedCandidate.MaxConfidence, (float)confidence);
+            matchedCandidate.LastSourceThreadId = string.IsNullOrWhiteSpace(sourceThreadId) ? matchedCandidate.LastSourceThreadId : sourceThreadId;
+            matchedCandidate.FirstObservedAtUtc = string.IsNullOrWhiteSpace(matchedCandidate.FirstObservedAtUtc)
+                ? DateTimeOffset.UtcNow.ToString("O")
+                : matchedCandidate.FirstObservedAtUtc;
+            matchedCandidate.LastObservedAtUtc = DateTimeOffset.UtcNow.ToString("O");
+
+            if (ShouldPromoteHabitCandidate(matchedCandidate))
+            {
+                current.Items.Remove(matchedCandidate);
+                UpsertBullet(
+                    Path.Combine(rootDirectoryPath, UserDirectoryName, HabitsFileName),
+                    "## Stable Preferences",
+                    matchedCandidate.Text,
+                    BuildHabitsTemplate());
+            }
+
+            SaveHabitCandidatePool(filePath, current);
+        }
+
+        private void RemoveMatchingHabitCandidate(string? candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                return;
+            }
+
+            var filePath = Path.Combine(rootDirectoryPath, UserDirectoryName, HabitCandidatesFileName);
+            EnsureFileExists(filePath, BuildHabitCandidatesInitialContent());
+            var current = LoadHabitCandidatePool(filePath);
+            var comparisonKey = BuildComparisonValue(candidate);
+            current.Items = current.Items
+                .Where(item => !string.Equals(item.ComparisonKey, comparisonKey, StringComparison.Ordinal))
+                .ToList();
+            SaveHabitCandidatePool(filePath, current);
+        }
+
+        private static bool ShouldPromoteHabitCandidate(HabitCandidateItem candidate)
+        {
+            if (candidate == null || candidate.Occurrences < HabitCandidatePromotionCount)
+            {
+                return false;
+            }
+
+            var averageConfidence = candidate.Occurrences <= 0
+                ? 0d
+                : candidate.ConfidenceSum / candidate.Occurrences;
+            return averageConfidence >= HabitCandidatePromotionAverageConfidence;
+        }
+
+        private static HabitCandidatePoolFile LoadHabitCandidatePool(string filePath)
+        {
+            var json = File.ReadAllText(filePath);
+            var file = string.IsNullOrWhiteSpace(json)
+                ? null
+                : JsonUtility.FromJson<HabitCandidatePoolFile>(json);
+            if (file == null)
+            {
+                return new HabitCandidatePoolFile();
+            }
+
+            file.Items ??= new List<HabitCandidateItem>();
+            return file;
+        }
+
+        private static void SaveHabitCandidatePool(string filePath, HabitCandidatePoolFile file)
+        {
+            file.Items ??= new List<HabitCandidateItem>();
+            file.Items = file.Items
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Text))
+                .OrderByDescending(item => item.Occurrences)
+                .ThenByDescending(item => item.MaxConfidence)
+                .Take(32)
+                .ToList();
+            File.WriteAllText(filePath, JsonUtility.ToJson(file, true));
+        }
+
+        private static string BuildHabitCandidatesInitialContent()
+        {
+            return JsonUtility.ToJson(new HabitCandidatePoolFile(), true);
+        }
+
+        private IReadOnlyList<ManagedMemoryFile> BuildManagedMemoryFiles(string characterFingerprint, string characterDisplayName)
+        {
+            var safeCharacterFingerprint = ToSafeDirectoryName(characterFingerprint);
+            return new[]
+            {
+                new ManagedMemoryFile(
+                    Path.Combine(rootDirectoryPath, UserDirectoryName, HabitsFileName),
+                    BuildHabitsTemplate()),
+                new ManagedMemoryFile(
+                    Path.Combine(rootDirectoryPath, UserDirectoryName, UserFactsFileName),
+                    BuildUserFactsTemplate()),
+                new ManagedMemoryFile(
+                    Path.Combine(rootDirectoryPath, CharactersDirectoryName, safeCharacterFingerprint, BondFileName),
+                    BuildBondTemplate(characterDisplayName)),
+                new ManagedMemoryFile(
+                    Path.Combine(rootDirectoryPath, CharactersDirectoryName, safeCharacterFingerprint, "memory", CharacterFactsFileName),
+                    BuildCharacterFactsTemplate(characterDisplayName)),
+            };
+        }
+
+        private static MemoryWriteTarget? FindMatchingBulletTarget(IReadOnlyList<ManagedMemoryFile> managedFiles, string? candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                return null;
+            }
+
+            foreach (var managedFile in managedFiles)
+            {
+                EnsureFileExists(managedFile.FilePath, managedFile.InitialContent);
+                var content = File.ReadAllText(managedFile.FilePath);
+                var bulletEntry = FindBestMatchingBulletEntry(content, candidate);
+                if (bulletEntry != null && !string.IsNullOrWhiteSpace(bulletEntry.SectionHeading))
+                {
+                    return new MemoryWriteTarget(managedFile.FilePath, bulletEntry.SectionHeading, managedFile.InitialContent);
+                }
+            }
+
+            return null;
+        }
+
+        private static void RemoveMatchingBulletFromFiles(IReadOnlyList<ManagedMemoryFile> managedFiles, string? candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                return;
+            }
+
+            foreach (var managedFile in managedFiles)
+            {
+                EnsureFileExists(managedFile.FilePath, managedFile.InitialContent);
+                var current = File.ReadAllText(managedFile.FilePath);
+                var updated = RemoveMatchingBullet(current, candidate);
+                if (!string.Equals(current, updated, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(managedFile.FilePath, TouchUpdatedAt(updated));
+                }
+            }
+        }
+
+        private static void UpsertBullet(string filePath, string sectionHeading, string bulletText, string initialContent)
         {
             EnsureFileExists(filePath, initialContent);
             var current = File.ReadAllText(filePath);
-            var updated = RemoveBullet(current, replaces);
-            updated = RemoveBullet(updated, bulletText);
+            var updated = RemoveMatchingBullet(current, bulletText);
             updated = InsertBullet(updated, sectionHeading, bulletText);
-            File.WriteAllText(filePath, updated);
+            File.WriteAllText(filePath, TouchUpdatedAt(updated));
         }
 
-        private static string RemoveBullet(string content, string? bulletText)
+        private static string RemoveMatchingBullet(string content, string? candidate)
         {
-            if (string.IsNullOrWhiteSpace(bulletText) || string.IsNullOrWhiteSpace(content))
+            if (string.IsNullOrWhiteSpace(candidate) || string.IsNullOrWhiteSpace(content))
             {
                 return content;
             }
 
+            var matchedBullet = FindBestMatchingBulletEntry(content, candidate);
+            return matchedBullet == null
+                ? content
+                : RemoveExactBullet(content, matchedBullet.Text);
+        }
+
+        private static string RemoveExactBullet(string content, string bulletText)
+        {
             var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
             var filtered = lines
                 .Where(line => !string.Equals(line.Trim(), $"- {bulletText.Trim()}", StringComparison.OrdinalIgnoreCase))
@@ -378,13 +580,149 @@ namespace VividSoul.Runtime.AI
             var nextSectionIndex = normalized.IndexOf("\n## ", insertSearchStart, StringComparison.Ordinal);
             var insertionIndex = nextSectionIndex >= 0 ? nextSectionIndex : normalized.Length;
             var sectionBody = normalized.Substring(insertSearchStart, insertionIndex - insertSearchStart);
-            var cleanedSectionBody = sectionBody.TrimEnd();
+            var cleanedSectionBody = string.Join(
+                "\n",
+                sectionBody
+                    .Split('\n')
+                    .Where(line => !IsPlaceholderBullet(line)))
+                .TrimEnd();
             var prefix = normalized[..insertSearchStart];
             var suffix = normalized[insertionIndex..];
             var joinedBody = string.IsNullOrWhiteSpace(cleanedSectionBody)
                 ? $"\n\n- {bulletText}\n"
                 : $"{cleanedSectionBody}\n- {bulletText}\n";
             return $"{prefix}{joinedBody}{suffix}".TrimEnd() + "\n";
+        }
+
+        private static BulletEntry? FindBestMatchingBulletEntry(string content, string candidate)
+        {
+            var comparisonCandidate = BuildComparisonValue(candidate);
+            if (string.IsNullOrWhiteSpace(comparisonCandidate))
+            {
+                return null;
+            }
+
+            return EnumerateBulletEntries(content)
+                .Select(entry => new
+                {
+                    Entry = entry,
+                    Score = GetMatchScore(entry.Text, comparisonCandidate),
+                })
+                .Where(result => result.Score > 0)
+                .OrderByDescending(result => result.Score)
+                .Select(result => result.Entry)
+                .FirstOrDefault();
+        }
+
+        private static IEnumerable<BulletEntry> EnumerateBulletEntries(string content)
+        {
+            var currentSectionHeading = string.Empty;
+            foreach (var line in content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+            {
+                var trimmedLine = line.Trim();
+                if (trimmedLine.StartsWith("## ", StringComparison.Ordinal))
+                {
+                    currentSectionHeading = trimmedLine;
+                    continue;
+                }
+
+                if (trimmedLine.StartsWith("- ", StringComparison.Ordinal))
+                {
+                    var bulletText = NormalizeBulletText(trimmedLine[2..]);
+                    if (!string.IsNullOrWhiteSpace(bulletText))
+                    {
+                        yield return new BulletEntry(currentSectionHeading, bulletText);
+                    }
+                }
+            }
+        }
+
+        private static int GetMatchScore(string existingText, string comparisonCandidate)
+        {
+            var existingComparisonValue = BuildComparisonValue(existingText);
+            if (string.IsNullOrWhiteSpace(existingComparisonValue))
+            {
+                return 0;
+            }
+
+            if (string.Equals(existingComparisonValue, comparisonCandidate, StringComparison.Ordinal))
+            {
+                return 1000 + existingComparisonValue.Length;
+            }
+
+            if (existingComparisonValue.Contains(comparisonCandidate, StringComparison.Ordinal)
+                || comparisonCandidate.Contains(existingComparisonValue, StringComparison.Ordinal))
+            {
+                return 500 + Math.Min(existingComparisonValue.Length, comparisonCandidate.Length);
+            }
+
+            return 0;
+        }
+
+        private static bool IsPlaceholderBullet(string line)
+        {
+            var trimmedLine = line.Trim();
+            return trimmedLine.StartsWith("- 暂无", StringComparison.Ordinal);
+        }
+
+        private static string TouchUpdatedAt(string content)
+        {
+            var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+            if (lines.Length == 0 || !string.Equals(lines[0].Trim(), "---", StringComparison.Ordinal))
+            {
+                return content;
+            }
+
+            for (var index = 1; index < lines.Length; index++)
+            {
+                if (string.Equals(lines[index].Trim(), "---", StringComparison.Ordinal))
+                {
+                    break;
+                }
+
+                if (lines[index].TrimStart().StartsWith("updatedAt:", StringComparison.Ordinal))
+                {
+                    lines[index] = $"updatedAt: \"{DateTimeOffset.Now:O}\"";
+                    return string.Join("\n", lines).TrimEnd() + "\n";
+                }
+            }
+
+            return content;
+        }
+
+        private static string BuildComparisonValue(string rawValue)
+        {
+            return string.IsNullOrWhiteSpace(rawValue)
+                ? string.Empty
+                : new string(rawValue
+                    .Where(static character => !char.IsWhiteSpace(character) && !char.IsPunctuation(character) && character != '`')
+                    .Select(char.ToLowerInvariant)
+                    .ToArray());
+        }
+
+        private sealed record ManagedMemoryFile(string FilePath, string InitialContent);
+
+        private sealed record MemoryWriteTarget(string FilePath, string SectionHeading, string InitialContent);
+
+        private sealed record BulletEntry(string SectionHeading, string Text);
+
+        [Serializable]
+        private sealed class HabitCandidatePoolFile
+        {
+            public List<HabitCandidateItem> Items = new();
+        }
+
+        [Serializable]
+        private sealed class HabitCandidateItem
+        {
+            public string Text = string.Empty;
+            public string ComparisonKey = string.Empty;
+            public int Occurrences;
+            public float ConfidenceSum;
+            public float MaxConfidence;
+            public string FirstObservedAtUtc = string.Empty;
+            public string LastObservedAtUtc = string.Empty;
+            public string LastSourceThreadId = string.Empty;
         }
     }
 }

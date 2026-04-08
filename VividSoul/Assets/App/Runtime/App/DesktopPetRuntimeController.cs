@@ -39,17 +39,14 @@ namespace VividSoul.Runtime.App
         private const string StartupAnimationDirectoryEnvironmentVariable = "VIVIDSOUL_LOCAL_VRMA_DIR";
         private const string StartupAnimationFileEnvironmentVariable = "VIVIDSOUL_LOCAL_VRMA_PATH";
         private const float ConversationAmbientPoseSuppressionSeconds = 18f;
-
-        private static readonly BuiltInPoseOption[] BuiltInPoseOptions =
-        {
-            new("vrma_01", "VRMA_01 Show full body", "Defaults/Animations/VRMA_MotionPack/VRMA_01.vrma"),
-            new("vrma_02", "VRMA_02 Greeting", "Defaults/Animations/VRMA_MotionPack/VRMA_02.vrma"),
-            new("vrma_03", "VRMA_03 Peace sign", "Defaults/Animations/VRMA_MotionPack/VRMA_03.vrma"),
-            new("vrma_04", "VRMA_04 Shoot", "Defaults/Animations/VRMA_MotionPack/VRMA_04.vrma"),
-            new("vrma_05", "VRMA_05 Spin", "Defaults/Animations/VRMA_MotionPack/VRMA_05.vrma"),
-            new("vrma_06", "VRMA_06 Model pose", "Defaults/Animations/VRMA_MotionPack/VRMA_06.vrma"),
-            new("vrma_07", "VRMA_07 Squat", "Defaults/Animations/VRMA_MotionPack/VRMA_07.vrma"),
-        };
+        private const float CompactWindowHorizontalPadding = 56f;
+        private const float CompactWindowTopPadding = 72f;
+        private const float CompactWindowBottomPadding = 44f;
+        private const float CompactWindowMinimumWidth = 280f;
+        private const float CompactWindowMinimumHeight = 320f;
+        private const float CompactWindowRectChangeThreshold = 2f;
+        private const int IdleTargetFrameRate = 30;
+        private const int ActiveTargetFrameRate = 60;
 
         [SerializeField] private Camera? interactionCamera;
         [SerializeField] private Transform? modelAnchor;
@@ -84,14 +81,19 @@ namespace VividSoul.Runtime.App
         private float suppressAmbientPoseUntilTime;
         private bool isClickThroughLocked;
         private bool isContextMenuOpen;
+        private bool isExpandedWindowMode;
         private bool isTopMostEnabled;
+        private bool compactWindowEnabled;
         private int monitorIndex;
+        private int currentTargetFrameRate = ActiveTargetFrameRate;
+        private Vector2 savedWindowPosition;
+        private VrmImportPerformanceMode vrmImportPerformanceMode = VrmImportPerformanceMode.Balanced;
 
         public event Action<ModelLoadResult>? ModelLoaded;
         public event Action? ModelCleared;
         public event Action<string>? ModelLoadFailed;
         public event Action? ManagedLocalAnimationsChanged;
-        public event Action<string>? BuiltInPoseTriggered;
+        public event Action<BuiltInPosePlaybackEvent>? BuiltInPoseTriggered;
         public event Action<ConversationMessageEnvelope>? ConversationMessageReceived;
         public event Action<ConversationStatusSnapshot>? ConversationStatusChanged;
 
@@ -113,11 +115,13 @@ namespace VividSoul.Runtime.App
 
         public bool IsTopMostForced => ForceTopMost;
 
+        public bool UsesCompactWindow => false;
+
         public int MonitorIndex => monitorIndex;
 
         public string BuiltInDefaultPoseId => DefaultBuiltInPoseId;
 
-        public IReadOnlyList<BuiltInPoseOption> BuiltInPoses => BuiltInPoseOptions;
+        public IReadOnlyList<BuiltInPoseOption> BuiltInPoses => BuiltInPoseCatalog.All;
 
         public IReadOnlyList<CachedModelState> CachedModels => cachedModelStore != null
             ? cachedModelStore.Load()
@@ -145,9 +149,9 @@ namespace VividSoul.Runtime.App
             modelFingerprintService = new ModelFingerprintService();
             modelImportService = new ModelImportService(modelLibraryPaths, contentCatalog, modelFingerprintService);
             animationImportService = new AnimationImportService(animationLibraryPaths, contentCatalog, modelFingerprintService);
-            modelLoader = new VrmModelLoaderService(characterRuntimeAssembler);
             fileDialogService = new StandaloneFileDialogService();
             settingsStore = new DesktopPetSettingsStore();
+            modelLoader = new VrmModelLoaderService(characterRuntimeAssembler, settingsStore);
             modelLibraryMigrationService = new ModelLibraryMigrationService(settingsStore, modelLibraryPaths, modelImportService);
             steamPlatformService = new SteamworksNetPlatformService(steamAppId);
             windowService = new UniWindowWindowService(gameObject);
@@ -162,7 +166,10 @@ namespace VividSoul.Runtime.App
                 modelFingerprintService);
             mateConversationService = new MateConversationService(
                 new AiSettingsStore(),
-                new LocalLlmConversationBackend(mateConversationOrchestrator),
+                new LocalLlmConversationBackend(
+                    mateConversationOrchestrator,
+                    new AiSecretsStore(),
+                    modelFingerprintService),
                 new OpenClawConversationBackend(
                     new AiSecretsStore(),
                     new OpenClawGatewayClient(),
@@ -198,6 +205,9 @@ namespace VividSoul.Runtime.App
 
         private void Update()
         {
+            mateConversationService?.Tick(Time.unscaledTime);
+            UpdateTargetFrameRate();
+
             if (!ForceTopMost || windowService == null || !isTopMostEnabled)
             {
                 return;
@@ -209,9 +219,23 @@ namespace VividSoul.Runtime.App
             }
         }
 
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            mateConversationService?.NotifyApplicationFocus(hasFocus);
+            if (!hasFocus && windowService != null)
+            {
+                SaveCurrentWindowPosition();
+            }
+        }
+
         private void OnDestroy()
         {
             CancelCurrentLoad();
+            if (windowService != null)
+            {
+                SaveWindowSettings();
+            }
+
             if (mateConversationService != null)
             {
                 mateConversationService.MessageReceived -= HandleConversationMessageReceived;
@@ -387,7 +411,20 @@ namespace VividSoul.Runtime.App
             try
             {
                 var pose = FindRequiredBuiltInPose(poseId);
-                await PlayBuiltInPoseOnceAsync(pose);
+                await PlayBuiltInPoseOnceAsync(pose, useCatalogBubble: true);
+            }
+            catch (Exception exception)
+            {
+                ReportFailure(exception);
+            }
+        }
+
+        public async void PlayConversationBuiltInPose(string poseId)
+        {
+            try
+            {
+                var pose = FindRequiredBuiltInPose(poseId);
+                await PlayBuiltInPoseOnceAsync(pose, useCatalogBubble: false);
             }
             catch (Exception exception)
             {
@@ -640,6 +677,39 @@ namespace VividSoul.Runtime.App
             mateConversationService?.MarkMessagesRead();
         }
 
+        public void SetExpandedWindowMode(bool expanded)
+        {
+            if (isExpandedWindowMode == expanded)
+            {
+                return;
+            }
+
+            isExpandedWindowMode = expanded;
+            if (expanded)
+            {
+                ApplyExpandedWindowRect();
+                return;
+            }
+
+            if (!compactWindowEnabled)
+            {
+                ApplyWindowSettings();
+                return;
+            }
+
+            SyncCompactWindow(forceApply: true);
+        }
+
+        public void RefreshCompactWindowLayout()
+        {
+            if (isExpandedWindowMode || !compactWindowEnabled)
+            {
+                return;
+            }
+
+            SyncCompactWindow(forceApply: true);
+        }
+
         public void NotifyConversationActivity(float durationSeconds = ConversationAmbientPoseSuppressionSeconds)
         {
             suppressAmbientPoseUntilTime = Mathf.Max(
@@ -661,11 +731,6 @@ namespace VividSoul.Runtime.App
         [ContextMenu("Toggle ClickThrough")]
         public void ToggleClickThrough()
         {
-            if (!AllowClickThrough)
-            {
-                return;
-            }
-
             SetClickThrough(!isClickThroughLocked);
         }
 
@@ -802,7 +867,7 @@ namespace VividSoul.Runtime.App
         }
 
         [ContextMenu("Clear Selected Model")]
-        public void ClearSelectedModel()
+        public async void ClearSelectedModel()
         {
             EnsureServices();
             CancelCurrentLoad();
@@ -811,6 +876,7 @@ namespace VividSoul.Runtime.App
             {
                 characterRuntimeAssembler!.Destroy(currentModelRoot);
                 currentModelRoot = null;
+                await ReclaimUnusedResourcesAsync();
             }
 
             CurrentModel = null;
@@ -839,6 +905,82 @@ namespace VividSoul.Runtime.App
             };
 
             settingsStore.Save(settings);
+        }
+
+        public void SaveCurrentWindowPosition()
+        {
+            EnsureServices();
+            if (windowService == null)
+            {
+                return;
+            }
+
+            var position = ClampWindowPositionToMonitor(windowService.WindowPosition);
+            if ((position - windowService.WindowPosition).sqrMagnitude > 0.0001f)
+            {
+                windowService.SetWindowPosition(position);
+            }
+
+            savedWindowPosition = position;
+            var settings = settingsStore!.Load() with
+            {
+                HasWindowPosition = true,
+                WindowPositionX = position.x,
+                WindowPositionY = position.y,
+            };
+            settingsStore.Save(settings);
+        }
+
+        public Vector2 GetGlobalCursorPosition()
+        {
+            EnsureServices();
+            return windowService!.CursorPosition;
+        }
+
+        public Vector2 GetWindowPosition()
+        {
+            EnsureServices();
+            return windowService!.WindowPosition;
+        }
+
+        public Vector2 GetWindowClientSize()
+        {
+            EnsureServices();
+            return windowService!.ClientSize;
+        }
+
+        public void SetWindowPosition(Vector2 position)
+        {
+            EnsureServices();
+            windowService!.SetWindowPosition(position);
+        }
+
+        public Vector2 ClampCurrentWindowPositionToMonitor()
+        {
+            EnsureServices();
+            if (windowService == null)
+            {
+                return Vector2.zero;
+            }
+
+            var clampedPosition = ClampWindowPositionToMonitor(windowService.WindowPosition);
+            if ((clampedPosition - windowService.WindowPosition).sqrMagnitude > 0.0001f)
+            {
+                windowService.SetWindowPosition(clampedPosition);
+            }
+
+            return clampedPosition;
+        }
+
+        public Vector2 ClampWindowPositionToMonitor(Vector2 desiredPosition)
+        {
+            EnsureServices();
+            if (windowService == null || windowService.MonitorCount <= 0)
+            {
+                return desiredPosition;
+            }
+
+            return windowService.ClampWindowPositionToMonitor(desiredPosition, monitorIndex);
         }
 
         public void SetTopMost(bool enabled)
@@ -871,7 +1013,7 @@ namespace VividSoul.Runtime.App
 
             if (monitorCount > 0)
             {
-                windowService.MoveToMonitor(monitorIndex);
+                ApplyMonitorWindowRect();
                 windowService.EnsureVisible();
             }
 
@@ -1042,8 +1184,13 @@ namespace VividSoul.Runtime.App
                 if (previousModelRoot != null && previousModelRoot != currentModelRoot)
                 {
                     characterRuntimeAssembler!.Destroy(previousModelRoot);
+                    await ReclaimUnusedResourcesAsync();
                 }
 
+                if (compactWindowEnabled)
+                {
+                    SyncCompactWindow(forceApply: true);
+                }
                 ModelLoaded?.Invoke(result);
                 _ = RefreshConversationBackendAsync();
             }
@@ -1087,7 +1234,7 @@ namespace VividSoul.Runtime.App
             modelFingerprintService ??= new ModelFingerprintService();
             modelImportService ??= new ModelImportService(modelLibraryPaths, contentCatalog, modelFingerprintService);
             animationImportService ??= new AnimationImportService(animationLibraryPaths, contentCatalog, modelFingerprintService);
-            modelLoader ??= new VrmModelLoaderService(characterRuntimeAssembler);
+            modelLoader ??= new VrmModelLoaderService(characterRuntimeAssembler, settingsStore!);
             fileDialogService ??= new StandaloneFileDialogService();
             if (settingsStore == null)
             {
@@ -1111,7 +1258,10 @@ namespace VividSoul.Runtime.App
             {
                 mateConversationService = new MateConversationService(
                     new AiSettingsStore(),
-                    new LocalLlmConversationBackend(mateConversationOrchestrator),
+                    new LocalLlmConversationBackend(
+                        mateConversationOrchestrator,
+                        new AiSecretsStore(),
+                        modelFingerprintService),
                     new OpenClawConversationBackend(
                         new AiSecretsStore(),
                         new OpenClawGatewayClient(),
@@ -1329,6 +1479,11 @@ namespace VividSoul.Runtime.App
             isTopMostEnabled = ForceTopMost || settings.IsTopMost;
             isClickThroughLocked = AllowClickThrough && settings.IsClickThrough;
             monitorIndex = settings.MonitorIndex;
+            compactWindowEnabled = false;
+            savedWindowPosition = settings.HasWindowPosition
+                ? new Vector2(settings.WindowPositionX, settings.WindowPositionY)
+                : Vector2.zero;
+            vrmImportPerformanceMode = settings.VrmImportPerformanceMode;
         }
 
         private void ApplyWindowSettings()
@@ -1342,7 +1497,19 @@ namespace VividSoul.Runtime.App
 
             if (windowService.MonitorCount > 0)
             {
-                windowService.FitToMonitor(monitorIndex);
+                ApplyMonitorWindowRect();
+            }
+
+            if (!isExpandedWindowMode && compactWindowEnabled)
+            {
+                if (settingsStore!.Load().HasWindowPosition)
+                {
+                    var clampedSavedWindowPosition = ClampWindowPositionToMonitor(savedWindowPosition);
+                    savedWindowPosition = clampedSavedWindowPosition;
+                    windowService.SetWindowPosition(clampedSavedWindowPosition);
+                }
+
+                SyncCompactWindow(forceApply: true);
             }
 
             windowService.EnsureVisible();
@@ -1355,6 +1522,11 @@ namespace VividSoul.Runtime.App
                 IsTopMost = ForceTopMost || isTopMostEnabled,
                 IsClickThrough = AllowClickThrough && isClickThroughLocked,
                 MonitorIndex = monitorIndex,
+                CompactWindowEnabled = compactWindowEnabled,
+                HasWindowPosition = true,
+                WindowPositionX = windowService?.WindowPosition.x ?? savedWindowPosition.x,
+                WindowPositionY = windowService?.WindowPosition.y ?? savedWindowPosition.y,
+                VrmImportPerformanceMode = vrmImportPerformanceMode,
             };
 
             settingsStore!.Save(settings);
@@ -1393,7 +1565,10 @@ namespace VividSoul.Runtime.App
                 cancellationToken: cancellationToken);
         }
 
-        private async Task PlayBuiltInPoseOnceAsync(BuiltInPoseOption pose, CancellationToken cancellationToken = default)
+        private async Task PlayBuiltInPoseOnceAsync(
+            BuiltInPoseOption pose,
+            bool useCatalogBubble,
+            CancellationToken cancellationToken = default)
         {
             var posePath = GetBuiltInPosePath(pose);
             if (!File.Exists(posePath))
@@ -1401,7 +1576,7 @@ namespace VividSoul.Runtime.App
                 throw new FileNotFoundException("The built-in pose file does not exist.", posePath);
             }
 
-            BuiltInPoseTriggered?.Invoke(pose.Id);
+            BuiltInPoseTriggered?.Invoke(new BuiltInPosePlaybackEvent(pose.Id, useCatalogBubble));
 
             var fallbackMotionController = GetFallbackMotionController();
             if (fallbackMotionController != null)
@@ -1410,14 +1585,15 @@ namespace VividSoul.Runtime.App
                 return;
             }
 
-            await GetAnimationController().PlayPoseOnceAsync(posePath, cancellationToken);
+            await GetAnimationController().PlayOneShotPathAsync(
+                posePath,
+                returnToIdle: true,
+                cancellationToken);
         }
 
         private static BuiltInPoseOption FindRequiredBuiltInPose(string poseId)
         {
-            return BuiltInPoseOptions.FirstOrDefault(pose =>
-                       string.Equals(pose.Id, poseId, StringComparison.OrdinalIgnoreCase))
-                   ?? throw new InvalidOperationException($"Built-in pose '{poseId}' was not found.");
+            return BuiltInPoseCatalog.FindRequired(poseId);
         }
 
         private static string GetBuiltInPosePath(BuiltInPoseOption pose)
@@ -1485,6 +1661,143 @@ namespace VividSoul.Runtime.App
             }
 
             ModelLoadFailed?.Invoke(exception.Message);
+        }
+
+        private void SyncCompactWindow(bool forceApply)
+        {
+            if (windowService == null || currentModelRoot == null || InteractionCamera == null || boundsService == null)
+            {
+                return;
+            }
+
+            if (!boundsService.TryGetScreenRect(InteractionCamera, currentModelRoot, out var screenRect))
+            {
+                return;
+            }
+
+            if (screenRect.width < 8f || screenRect.height < 8f)
+            {
+                return;
+            }
+
+            var desiredRect = BuildCompactWindowRect(screenRect);
+            var currentRect = new Rect(windowService.WindowPosition, windowService.WindowSize);
+            if (!forceApply && AreRectsApproximatelyEqual(currentRect, desiredRect))
+            {
+                return;
+            }
+
+            windowService.SetWindowRect(desiredRect);
+            windowService.EnsureVisible();
+            savedWindowPosition = desiredRect.position;
+        }
+
+        private Rect BuildCompactWindowRect(Rect modelScreenRect)
+        {
+            var desiredMin = new Vector2(
+                modelScreenRect.xMin - CompactWindowHorizontalPadding,
+                modelScreenRect.yMin - CompactWindowBottomPadding);
+            var desiredMax = new Vector2(
+                modelScreenRect.xMax + CompactWindowHorizontalPadding,
+                modelScreenRect.yMax + CompactWindowTopPadding);
+            var desiredSize = new Vector2(
+                Mathf.Max(CompactWindowMinimumWidth, desiredMax.x - desiredMin.x),
+                Mathf.Max(CompactWindowMinimumHeight, desiredMax.y - desiredMin.y));
+            var desiredCenter = modelScreenRect.center + new Vector2(0f, CompactWindowTopPadding * 0.15f);
+            var localOrigin = desiredCenter - (desiredSize * 0.5f);
+            var globalOrigin = windowService!.WindowPosition + localOrigin;
+            return new Rect(globalOrigin, desiredSize);
+        }
+
+        private void ApplyExpandedWindowRect()
+        {
+            if (windowService == null)
+            {
+                return;
+            }
+
+            if (windowService.MonitorCount > 0)
+            {
+                ApplyMonitorWindowRect();
+                windowService.EnsureVisible();
+            }
+        }
+
+        private void ApplyMonitorWindowRect()
+        {
+            if (windowService == null || windowService.MonitorCount <= 0)
+            {
+                return;
+            }
+
+            windowService.FitToMonitor(monitorIndex);
+            var fittedRect = new Rect(windowService.WindowPosition, windowService.WindowSize);
+            if (fittedRect == Rect.zero)
+            {
+                return;
+            }
+
+            if (monitorIndex == 0)
+            {
+                fittedRect.position = Vector2.zero;
+            }
+
+            windowService.SetWindowRect(fittedRect);
+        }
+
+        private static bool AreRectsApproximatelyEqual(Rect left, Rect right)
+        {
+            return Mathf.Abs(left.x - right.x) <= CompactWindowRectChangeThreshold
+                   && Mathf.Abs(left.y - right.y) <= CompactWindowRectChangeThreshold
+                   && Mathf.Abs(left.width - right.width) <= CompactWindowRectChangeThreshold
+                   && Mathf.Abs(left.height - right.height) <= CompactWindowRectChangeThreshold;
+        }
+
+        private void UpdateTargetFrameRate()
+        {
+            var targetFrameRate = ShouldUseActiveFrameRate()
+                ? ActiveTargetFrameRate
+                : IdleTargetFrameRate;
+            if (currentTargetFrameRate == targetFrameRate)
+            {
+                return;
+            }
+
+            Application.targetFrameRate = targetFrameRate;
+            currentTargetFrameRate = targetFrameRate;
+        }
+
+        private bool ShouldUseActiveFrameRate()
+        {
+            var dragController = GetComponent<DesktopPetDragController>();
+            if (dragController != null && dragController.IsDragging)
+            {
+                return true;
+            }
+
+            var rotationController = GetComponent<DesktopPetRotationController>();
+            if (rotationController != null && rotationController.IsRotating)
+            {
+                return true;
+            }
+
+            var movementController = GetComponent<DesktopPetMovementController>();
+            if (movementController != null && movementController.IsMoving)
+            {
+                return true;
+            }
+
+            var animationController = GetComponent<DesktopPetAnimationController>();
+            return isExpandedWindowMode
+                   || isContextMenuOpen
+                   || (animationController != null && animationController.HasActivePlayback);
+        }
+
+        private static async Task ReclaimUnusedResourcesAsync()
+        {
+            await Task.Yield();
+            await Resources.UnloadUnusedAssets();
+            GC.Collect();
         }
 
         private static SelectedContentSource ToSelectedContentSource(ContentSource source)

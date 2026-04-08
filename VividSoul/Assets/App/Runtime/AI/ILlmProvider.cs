@@ -14,6 +14,8 @@ namespace VividSoul.Runtime.AI
 
         bool SupportsSystemPrompt { get; }
 
+    bool SupportsToolCalls { get; }
+
         Task<LlmResponseEnvelope> GenerateAsync(LlmRequestContext request, CancellationToken cancellationToken);
     }
 
@@ -24,7 +26,19 @@ namespace VividSoul.Runtime.AI
         float Temperature,
         int MaxOutputTokens,
         bool EnableStreaming,
-        IReadOnlyList<ChatMessage> Messages);
+    IReadOnlyList<ChatMessage> Messages,
+    IReadOnlyList<LlmToolDefinition>? Tools = null,
+    string ForcedToolName = "");
+
+public sealed record LlmToolDefinition(
+    string Name,
+    string Description,
+    IReadOnlyDictionary<string, object?> ParametersSchema);
+
+public sealed record LlmToolCall(
+    string Id,
+    string Name,
+    string ArgumentsJson);
 
     public sealed record LlmResponseEnvelope(
         string DisplayText,
@@ -33,5 +47,7 @@ namespace VividSoul.Runtime.AI
         string ProviderId,
         string Model,
         int PromptCharacters,
-        int CompletionCharacters);
+    int CompletionCharacters,
+    string RawText,
+    IReadOnlyList<LlmToolCall> ToolCalls);
 }
