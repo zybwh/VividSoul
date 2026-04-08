@@ -8,6 +8,7 @@ using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 using VividSoul.Runtime.AI;
+using VividSoul.Runtime.Animation;
 using VividSoul.Runtime.Avatar;
 using VividSoul.Runtime.Content;
 using VividSoul.Runtime.Settings;
@@ -52,6 +53,7 @@ namespace VividSoul.Runtime.App
         private SettingsWindowUi? windowUi;
         private SettingsTab activeTab = SettingsTab.Llm;
         private string pendingDeleteModelPath = string.Empty;
+        private string pendingDeleteAnimationPath = string.Empty;
         private string selectedProviderId = string.Empty;
         private string configurationStatusMessage = "当前配置尚未保存。";
         private float nextStatsRefreshAt;
@@ -65,6 +67,7 @@ namespace VividSoul.Runtime.App
             llmUsageStatsStore = new LlmUsageStatsStore();
             this.runtimeController.ModelLoaded += HandleRuntimeModelChanged;
             this.runtimeController.ModelCleared += HandleRuntimeModelCleared;
+            this.runtimeController.ManagedLocalAnimationsChanged += HandleManagedLocalAnimationsChanged;
         }
 
         public bool IsVisible => windowUi != null && windowUi.Root.gameObject.activeSelf;
@@ -73,6 +76,7 @@ namespace VividSoul.Runtime.App
         {
             runtimeController.ModelLoaded -= HandleRuntimeModelChanged;
             runtimeController.ModelCleared -= HandleRuntimeModelCleared;
+            runtimeController.ManagedLocalAnimationsChanged -= HandleManagedLocalAnimationsChanged;
         }
 
         public void Show(Canvas canvas)
@@ -85,6 +89,7 @@ namespace VividSoul.Runtime.App
             EnsureWindowUi(canvas);
             LoadEditingState();
             RefreshManagedModelLibraryList();
+            RefreshManagedAnimationLibraryList();
             ResizeWindow();
             ShowTab(activeTab);
             windowUi!.Root.gameObject.SetActive(true);
@@ -145,6 +150,17 @@ namespace VividSoul.Runtime.App
 
             pendingDeleteModelPath = string.Empty;
             RefreshManagedModelLibraryList();
+        }
+
+        private void HandleManagedLocalAnimationsChanged()
+        {
+            pendingDeleteAnimationPath = string.Empty;
+            if (!IsVisible || activeTab != SettingsTab.General)
+            {
+                return;
+            }
+
+            RefreshManagedAnimationLibraryList();
         }
 
         private void EnsureWindowUi(Canvas canvas)
@@ -268,6 +284,8 @@ namespace VividSoul.Runtime.App
             sidebar.LlmTabButton.onClick.AddListener(() => ShowTab(SettingsTab.Llm));
             generalContent.ImportButton.onClick.AddListener(runtimeController.OpenLocalModelDialog);
             generalContent.RefreshButton.onClick.AddListener(RefreshManagedModelLibraryList);
+            generalContent.ImportActionButton.onClick.AddListener(runtimeController.OpenLocalAnimationFileDialog);
+            generalContent.RefreshActionButton.onClick.AddListener(RefreshManagedAnimationLibraryList);
             llmContent.AddProviderButton.onClick.AddListener(AddProviderProfile);
             llmContent.RemoveProviderButton.onClick.AddListener(RemoveSelectedProviderProfile);
             llmContent.CycleProviderTypeButton.onClick.AddListener(CycleSelectedProviderType);
@@ -651,6 +669,7 @@ namespace VividSoul.Runtime.App
             if (isGeneral)
             {
                 RefreshManagedModelLibraryList();
+                RefreshManagedAnimationLibraryList();
             }
 
             RebuildLayout();
@@ -736,8 +755,8 @@ namespace VividSoul.Runtime.App
             var scrollRoot = CreateScrollView(root.transform, out var content);
 
             var card = CreateSectionCard(content, "GeneralCard", "常规");
-            SetPreferredHeight(card, 132f);
-            CreateBodyText(card, "这里先放角色库管理。导入过的本地角色会显示在下方，并支持在设置内直接切换或删除。");
+            SetPreferredHeight(card, 152f);
+            CreateBodyText(card, "这里集中放角色库与动作管理。角色仍然是当前主要内容对象，动作则以受控动作库的形式提供应用、导入和删除。");
 
             var librarySection = CreateSectionCard(content, "ModelLibrarySection", "角色库管理");
             CreateHintText(librarySection, "仅显示已导入到角色库的本地角色。删除会移除对应角色文件；当前角色删除后会先卸载。");
@@ -753,6 +772,32 @@ namespace VividSoul.Runtime.App
             var libraryListLayout = libraryListRoot.gameObject.AddComponent<LayoutElement>();
             libraryListLayout.minHeight = 40f;
 
+            var actionSection = CreateSectionCard(content, "ActionLibrarySection", "动作管理");
+            CreateHintText(actionSection, "内置动作可直接应用；导入到动作库的本地 VRMA 会长期保留，并支持再次应用或删除。");
+
+            var builtInTitle = CreateSingleLineText(actionSection, "BuiltInActionsTitle", "内置动作", 15, FontStyle.Bold, TextSecondaryColor, TextAnchor.MiddleLeft);
+            var builtInTitleLayout = builtInTitle.gameObject.AddComponent<LayoutElement>();
+            builtInTitleLayout.preferredHeight = 26f;
+            var builtInListRoot = CreateLayoutContainer(actionSection, "BuiltInActionList", isHorizontal: false, 10f, new RectOffset(0, 0, 0, 0));
+            builtInListRoot.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            var builtInListLayout = builtInListRoot.gameObject.AddComponent<LayoutElement>();
+            builtInListLayout.minHeight = 40f;
+
+            var localTitle = CreateSingleLineText(actionSection, "LocalActionsTitle", "本地动作库", 15, FontStyle.Bold, TextSecondaryColor, TextAnchor.MiddleLeft);
+            var localTitleLayout = localTitle.gameObject.AddComponent<LayoutElement>();
+            localTitleLayout.preferredHeight = 26f;
+            var actionToolbar = CreateLayoutContainer(actionSection, "ActionToolbar", isHorizontal: true, 8f, new RectOffset(0, 0, 0, 0), fitToContents: true);
+            var importActionButton = CreateButton(actionToolbar, "导入 VRMA", ButtonColor, 40f, 112f);
+            var actionToolbarSpacer = new GameObject("Spacer", typeof(RectTransform), typeof(LayoutElement));
+            actionToolbarSpacer.transform.SetParent(actionToolbar, false);
+            actionToolbarSpacer.GetComponent<LayoutElement>().flexibleWidth = 1f;
+            var refreshActionButton = CreateButton(actionToolbar, "刷新动作库", ButtonMutedColor, 40f, 112f);
+            var actionHintText = CreateHintText(actionSection, string.Empty);
+            var actionListRoot = CreateLayoutContainer(actionSection, "ActionList", isHorizontal: false, 10f, new RectOffset(0, 0, 0, 0));
+            actionListRoot.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            var actionListLayout = actionListRoot.gameObject.AddComponent<LayoutElement>();
+            actionListLayout.minHeight = 40f;
+
             return new GeneralTabUi(
                 root,
                 scrollRoot,
@@ -761,7 +806,13 @@ namespace VividSoul.Runtime.App
                 libraryHintText,
                 libraryListRoot,
                 importButton,
-                refreshButton);
+                refreshButton,
+                actionSection,
+                builtInListRoot,
+                actionHintText,
+                actionListRoot,
+                importActionButton,
+                refreshActionButton);
         }
 
         private void RefreshManagedModelLibraryList()
@@ -824,8 +875,8 @@ namespace VividSoul.Runtime.App
             var isCurrentModel = runtimeController.IsCurrentModelPath(managedModel.EntryPath);
             var modelExists = File.Exists(managedModel.EntryPath);
             var title = isCurrentModel
-                ? $"{GetManagedModelDisplayName(managedModel)}  (当前)"
-                : GetManagedModelDisplayName(managedModel);
+                ? $"{GetContentDisplayName(managedModel)}  (当前)"
+                : GetContentDisplayName(managedModel);
             var titleText = CreateText(detailsColumn, "Title", title, 16, FontStyle.Bold, TextPrimaryColor, TextAnchor.UpperLeft);
             titleText.horizontalOverflow = HorizontalWrapMode.Wrap;
             titleText.verticalOverflow = VerticalWrapMode.Overflow;
@@ -867,7 +918,7 @@ namespace VividSoul.Runtime.App
             {
                 runtimeController.LoadManagedLocalModel(managedModel.EntryPath);
                 pendingDeleteModelPath = string.Empty;
-                statusReporter($"已切换角色：{GetManagedModelDisplayName(managedModel)}");
+                statusReporter($"已切换角色：{GetContentDisplayName(managedModel)}");
                 RefreshManagedModelLibraryList();
             }
             catch (UserFacingException exception)
@@ -885,7 +936,7 @@ namespace VividSoul.Runtime.App
             if (!PathsEqual(managedModel.EntryPath, pendingDeleteModelPath))
             {
                 pendingDeleteModelPath = managedModel.EntryPath;
-                statusReporter($"再次点击“确认删除”以移除角色：{GetManagedModelDisplayName(managedModel)}");
+                statusReporter($"再次点击“确认删除”以移除角色：{GetContentDisplayName(managedModel)}");
                 RefreshManagedModelLibraryList();
                 return;
             }
@@ -894,7 +945,7 @@ namespace VividSoul.Runtime.App
             {
                 runtimeController.DeleteManagedLocalModel(managedModel.EntryPath);
                 pendingDeleteModelPath = string.Empty;
-                statusReporter($"已删除角色：{GetManagedModelDisplayName(managedModel)}");
+                statusReporter($"已删除角色：{GetContentDisplayName(managedModel)}");
                 RefreshManagedModelLibraryList();
             }
             catch (UserFacingException exception)
@@ -904,6 +955,203 @@ namespace VividSoul.Runtime.App
             catch (Exception exception)
             {
                 statusReporter($"删除角色失败：{exception.Message}");
+            }
+        }
+
+        private void RefreshManagedAnimationLibraryList()
+        {
+            if (generalTabUi == null)
+            {
+                return;
+            }
+
+            ClearChildren(generalTabUi.BuiltInActionListRoot);
+            foreach (var builtInPose in runtimeController.BuiltInPoses)
+            {
+                CreateBuiltInActionRow(builtInPose);
+            }
+
+            ClearChildren(generalTabUi.ActionListRoot);
+            var managedAnimations = runtimeController.ManagedLocalAnimations
+                .Where(animation => runtimeController.CanDeleteManagedLocalAnimation(animation.EntryPath))
+                .ToArray();
+            if (!managedAnimations.Any())
+            {
+                pendingDeleteAnimationPath = string.Empty;
+                generalTabUi.ActionHintText.text = "当前还没有导入到动作库的本地 VRMA。点击“导入 VRMA”后，这里会自动出现。";
+                RebuildLayout();
+                return;
+            }
+
+            if (!managedAnimations.Any(animation => PathsEqual(animation.EntryPath, pendingDeleteAnimationPath)))
+            {
+                pendingDeleteAnimationPath = string.Empty;
+            }
+
+            generalTabUi.ActionHintText.text = "本地动作删除前需要再次确认；内置动作仅支持应用，不支持删除。";
+            foreach (var managedAnimation in managedAnimations)
+            {
+                CreateManagedAnimationRow(managedAnimation);
+            }
+
+            RebuildLayout();
+        }
+
+        private void CreateBuiltInActionRow(BuiltInPoseOption builtInPose)
+        {
+            if (generalTabUi == null)
+            {
+                return;
+            }
+
+            var row = CreateLayoutContainer(
+                generalTabUi.BuiltInActionListRoot,
+                $"BuiltInActionRow-{builtInPose.Id}",
+                isHorizontal: true,
+                spacing: 12f,
+                padding: new RectOffset(14, 14, 12, 12),
+                fitToContents: true);
+            var rowImage = row.gameObject.AddComponent<Image>();
+            rowImage.color = InputColor;
+            var rowOutline = row.gameObject.AddComponent<Outline>();
+            rowOutline.effectColor = SectionBorderColor;
+            rowOutline.effectDistance = new Vector2(1f, -1f);
+
+            var detailsColumn = CreateLayoutContainer(row, "Details", isHorizontal: false, 4f, new RectOffset(0, 0, 0, 0), fitToContents: true);
+            var detailsLayout = detailsColumn.gameObject.AddComponent<LayoutElement>();
+            detailsLayout.flexibleWidth = 1f;
+
+            var titleText = CreateText(detailsColumn, "Title", builtInPose.Label, 16, FontStyle.Bold, TextPrimaryColor, TextAnchor.UpperLeft);
+            titleText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            titleText.verticalOverflow = VerticalWrapMode.Overflow;
+            CreateBodyText(detailsColumn, $"内置动作 ID：{builtInPose.Id}\n来源：StreamingAssets 默认动作", 13, TextSecondaryColor);
+
+            var actionColumn = CreateLayoutContainer(row, "Actions", isHorizontal: false, 8f, new RectOffset(0, 0, 0, 0), fitToContents: true);
+            var actionColumnLayout = actionColumn.gameObject.AddComponent<LayoutElement>();
+            actionColumnLayout.preferredWidth = 104f;
+            actionColumnLayout.minWidth = 104f;
+            if (actionColumn.GetComponent<VerticalLayoutGroup>() is VerticalLayoutGroup actionLayoutGroup)
+            {
+                actionLayoutGroup.childAlignment = TextAnchor.UpperRight;
+                actionLayoutGroup.childControlWidth = false;
+                actionLayoutGroup.childForceExpandWidth = false;
+            }
+
+            var applyButton = CreateButton(actionColumn, "应用", ButtonColor, 36f, 96f);
+            applyButton.onClick.AddListener(() => ApplyBuiltInAction(builtInPose));
+            var builtinTagButton = CreateButton(actionColumn, "内置", ButtonMutedColor, 36f, 96f);
+            builtinTagButton.interactable = false;
+        }
+
+        private void CreateManagedAnimationRow(ContentItem managedAnimation)
+        {
+            if (generalTabUi == null)
+            {
+                return;
+            }
+
+            var row = CreateLayoutContainer(
+                generalTabUi.ActionListRoot,
+                $"ActionRow-{managedAnimation.Title}",
+                isHorizontal: true,
+                spacing: 12f,
+                padding: new RectOffset(14, 14, 12, 12),
+                fitToContents: true);
+            var rowImage = row.gameObject.AddComponent<Image>();
+            rowImage.color = InputColor;
+            var rowOutline = row.gameObject.AddComponent<Outline>();
+            rowOutline.effectColor = SectionBorderColor;
+            rowOutline.effectDistance = new Vector2(1f, -1f);
+
+            var detailsColumn = CreateLayoutContainer(row, "Details", isHorizontal: false, 4f, new RectOffset(0, 0, 0, 0), fitToContents: true);
+            var detailsLayout = detailsColumn.gameObject.AddComponent<LayoutElement>();
+            detailsLayout.flexibleWidth = 1f;
+
+            var titleText = CreateText(detailsColumn, "Title", GetContentDisplayName(managedAnimation), 16, FontStyle.Bold, TextPrimaryColor, TextAnchor.UpperLeft);
+            titleText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            titleText.verticalOverflow = VerticalWrapMode.Overflow;
+            var directoryPath = runtimeController.GetManagedLocalAnimationDisplayDirectory(managedAnimation.EntryPath);
+            CreateBodyText(detailsColumn, $"动作存放目录：{directoryPath}", 13, TextSecondaryColor);
+
+            var actionColumn = CreateLayoutContainer(row, "Actions", isHorizontal: false, 8f, new RectOffset(0, 0, 0, 0), fitToContents: true);
+            var actionColumnLayout = actionColumn.gameObject.AddComponent<LayoutElement>();
+            actionColumnLayout.preferredWidth = 104f;
+            actionColumnLayout.minWidth = 104f;
+            if (actionColumn.GetComponent<VerticalLayoutGroup>() is VerticalLayoutGroup actionLayoutGroup)
+            {
+                actionLayoutGroup.childAlignment = TextAnchor.UpperRight;
+                actionLayoutGroup.childControlWidth = false;
+                actionLayoutGroup.childForceExpandWidth = false;
+            }
+
+            var applyButton = CreateButton(actionColumn, "应用", ButtonColor, 36f, 96f);
+            applyButton.onClick.AddListener(() => ApplyManagedAnimation(managedAnimation));
+
+            var isPendingDelete = PathsEqual(managedAnimation.EntryPath, pendingDeleteAnimationPath);
+            var deleteButton = CreateButton(actionColumn, isPendingDelete ? "确认删除" : "删除", ButtonDangerColor, 36f, 96f);
+            deleteButton.onClick.AddListener(() => DeleteManagedAnimation(managedAnimation));
+        }
+
+        private void ApplyBuiltInAction(BuiltInPoseOption builtInPose)
+        {
+            try
+            {
+                runtimeController.ApplyBuiltInPose(builtInPose.Id);
+                statusReporter($"已应用内置动作：{builtInPose.Label}");
+            }
+            catch (UserFacingException exception)
+            {
+                statusReporter(exception.Message);
+            }
+            catch (Exception exception)
+            {
+                statusReporter($"应用动作失败：{exception.Message}");
+            }
+        }
+
+        private void ApplyManagedAnimation(ContentItem managedAnimation)
+        {
+            try
+            {
+                runtimeController.LoadManagedLocalAnimation(managedAnimation.EntryPath);
+                pendingDeleteAnimationPath = string.Empty;
+                statusReporter($"已应用动作：{GetContentDisplayName(managedAnimation)}");
+                RefreshManagedAnimationLibraryList();
+            }
+            catch (UserFacingException exception)
+            {
+                statusReporter(exception.Message);
+            }
+            catch (Exception exception)
+            {
+                statusReporter($"应用动作失败：{exception.Message}");
+            }
+        }
+
+        private void DeleteManagedAnimation(ContentItem managedAnimation)
+        {
+            if (!PathsEqual(managedAnimation.EntryPath, pendingDeleteAnimationPath))
+            {
+                pendingDeleteAnimationPath = managedAnimation.EntryPath;
+                statusReporter($"再次点击“确认删除”以移除动作：{GetContentDisplayName(managedAnimation)}");
+                RefreshManagedAnimationLibraryList();
+                return;
+            }
+
+            try
+            {
+                runtimeController.DeleteManagedLocalAnimation(managedAnimation.EntryPath);
+                pendingDeleteAnimationPath = string.Empty;
+                statusReporter($"已删除动作：{GetContentDisplayName(managedAnimation)}");
+                RefreshManagedAnimationLibraryList();
+            }
+            catch (UserFacingException exception)
+            {
+                statusReporter(exception.Message);
+            }
+            catch (Exception exception)
+            {
+                statusReporter($"删除动作失败：{exception.Message}");
             }
         }
 
@@ -1591,14 +1839,14 @@ namespace VividSoul.Runtime.App
             return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string GetManagedModelDisplayName(ContentItem managedModel)
+        private static string GetContentDisplayName(ContentItem item)
         {
-            if (!string.IsNullOrWhiteSpace(managedModel.Title))
+            if (!string.IsNullOrWhiteSpace(item.Title))
             {
-                return managedModel.Title.Trim();
+                return item.Title.Trim();
             }
 
-            return Path.GetFileNameWithoutExtension(managedModel.EntryPath);
+            return Path.GetFileNameWithoutExtension(item.EntryPath);
         }
 
         private static string TryFormatTimestamp(string rawTimestamp)
@@ -1726,7 +1974,13 @@ namespace VividSoul.Runtime.App
                 Text libraryHintText,
                 RectTransform libraryListRoot,
                 Button importButton,
-                Button refreshButton)
+                Button refreshButton,
+                RectTransform actionSection,
+                RectTransform builtInActionListRoot,
+                Text actionHintText,
+                RectTransform actionListRoot,
+                Button importActionButton,
+                Button refreshActionButton)
             {
                 Root = root;
                 ScrollRoot = scrollRoot;
@@ -1736,6 +1990,12 @@ namespace VividSoul.Runtime.App
                 LibraryListRoot = libraryListRoot;
                 ImportButton = importButton;
                 RefreshButton = refreshButton;
+                ActionSection = actionSection;
+                BuiltInActionListRoot = builtInActionListRoot;
+                ActionHintText = actionHintText;
+                ActionListRoot = actionListRoot;
+                ImportActionButton = importActionButton;
+                RefreshActionButton = refreshActionButton;
             }
 
             public GameObject Root { get; }
@@ -1753,6 +2013,18 @@ namespace VividSoul.Runtime.App
             public Button ImportButton { get; }
 
             public Button RefreshButton { get; }
+
+            public RectTransform ActionSection { get; }
+
+            public RectTransform BuiltInActionListRoot { get; }
+
+            public Text ActionHintText { get; }
+
+            public RectTransform ActionListRoot { get; }
+
+            public Button ImportActionButton { get; }
+
+            public Button RefreshActionButton { get; }
         }
 
         private sealed class LlmTabUi

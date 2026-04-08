@@ -1,6 +1,6 @@
 # VividSoul Status
 
-- Date: `2026-04-06`
+- Date: `2026-04-07`
 - Phase: repository cleanup and Unity-first foundation
 - Core project: `VividSoul`
 - Reference project: `utsuwa` (read-only)
@@ -72,7 +72,11 @@
 - Unified runtime UI font resolution across `DesktopPetRuntimeHud`, chat, settings, and speech bubbles via a shared system-font resolver so the menu and status text now follow the same `PingFang SC` / `微软雅黑`-first display strategy as the newer UI surfaces instead of falling back to `Arial` by default.
 - Started executing the runtime-shell restructure plan in code: the standalone chat launcher is no longer the default runtime entry, the right-click menu now surfaces `角色库` as a first-level command instead of a submenu, and the settings-side role-library view now consumes the real managed model library with import/apply/delete actions instead of the old recent-cache list.
 - Removed the obsolete right-click `随机走动` and `应用示例移动行为` commands now that they no longer fit the new runtime-shell direction and are no longer considered user-facing entry points.
+- Added the first formal `动作管理` implementation in the settings transition surface: built-in actions now have a stable apply list, local `.vrma` imports are copied into `Application.persistentDataPath/Content/Animations/`, and managed local actions can be re-applied or deleted just like managed roles.
 - Added a dedicated local-agent planning document for pure `OpenAI-compatible / MiniMax` style provider paths, fixing the design split between `Soul`, layered `Memory`, and durable `heartbeat/reminder` scheduling while explicitly keeping this work separate from the current `OpenClaw` transport integration.
+- Started executing Phase 1 of the local-agent plan for pure local providers: local chat persistence now migrates from the old single-session JSON into a `local-agent` storage root with hidden thread metadata, per-thread `jsonl` transcripts, compact index files, inactivity-window thread rollover, and a first deterministic compact skeleton path that trims older turns out of the active thread without exposing session management in the main UI.
+- Started executing Phase 2 of the local-agent plan for pure local providers: the runtime now bootstraps per-character `role.md`, global `habits.md`, and per-character `bond.md` files under the new `local-agent` storage root, and local provider prompts now inject that soul context so identity questions can anchor on the current rendered character instead of only the old global system prompt plus character name.
+- Started the first Phase 3 memory-write path for pure local providers: the runtime now bootstraps `user-facts.md` and per-character `facts.md`, injects those files into the local prompt context, and runs a dedicated `MemoryJudge` pass after successful local replies so explicit preferences, stable facts, and bond updates can begin flowing back into the markdown-based local memory files without depending on the old recent-turns-only path.
 
 ## Known Issues
 
@@ -96,4 +100,8 @@
 - Unify the remaining runtime UI text surfaces onto the same system-font resolution path so menus, settings, chat, and speech bubbles stop mixing `Arial` fallback-only behavior with platform-native font selection.
 - Continue replacing the remaining `Modern UI Pack` hard dependencies, starting with the runtime context-menu prefab path and speech-bubble shadow asset, now that font selection is no longer coupled to the old pack defaults.
 - Continue the runtime-shell migration by replacing the remaining role/action submenu flows with the planned unified main-panel structure, now that the first bridge step away from launcher-plus-submenu navigation is in place.
+- Decide when to move the current settings-side `动作管理` transition surface into the future unified main panel versus keeping it as a permanent low-frequency management page.
 - Turn the new local-agent `Soul / Memory / Heartbeat` plan into an implementation breakdown for the pure local-provider path, especially the markdown-first memory storage layout, hidden thread compaction pipeline, and restart-safe reminder scheduler.
+- Continue the local-agent execution path by wiring `role.md / habits.md / bond.md` into local prompt assembly, then layering `MemoryJudge` and reminder scheduling on top of the new hidden-thread storage foundation.
+- Continue the local-agent execution path by replacing the current soul-template bootstrap with real `MemoryJudge`-driven updates to `habits.md` / `bond.md`, while keeping the new role/bond prompt injection path stable for local providers.
+- Tighten the new local `MemoryJudge` path with better confidence gating, replacement semantics, and eventually an async/background write flow so memory updates stop adding a second provider roundtrip directly onto the visible chat latency path.

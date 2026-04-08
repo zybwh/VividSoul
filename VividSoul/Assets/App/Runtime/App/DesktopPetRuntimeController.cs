@@ -59,6 +59,8 @@ namespace VividSoul.Runtime.App
 
         private CharacterRuntimeAssembler? characterRuntimeAssembler;
         private AnimationPackageInstaller? animationPackageInstaller;
+        private AnimationLibraryPaths? animationLibraryPaths;
+        private AnimationImportService? animationImportService;
         private BehaviorPackageInstaller? behaviorPackageInstaller;
         private DesktopPetBoundsService? boundsService;
         private FileSystemContentCatalog? contentCatalog;
@@ -88,6 +90,7 @@ namespace VividSoul.Runtime.App
         public event Action<ModelLoadResult>? ModelLoaded;
         public event Action? ModelCleared;
         public event Action<string>? ModelLoadFailed;
+        public event Action? ManagedLocalAnimationsChanged;
         public event Action<string>? BuiltInPoseTriggered;
         public event Action<ConversationMessageEnvelope>? ConversationMessageReceived;
         public event Action<ConversationStatusSnapshot>? ConversationStatusChanged;
@@ -122,6 +125,8 @@ namespace VividSoul.Runtime.App
 
         public IReadOnlyList<ContentItem> ManagedLocalModels => GetManagedLocalModels();
 
+        public IReadOnlyList<ContentItem> ManagedLocalAnimations => GetManagedLocalAnimations();
+
         public IReadOnlyList<WorkshopContentItem> WorkshopContent => workshopContent;
 
         public string? LastErrorMessage { get; private set; }
@@ -132,12 +137,14 @@ namespace VividSoul.Runtime.App
         {
             characterRuntimeAssembler = new CharacterRuntimeAssembler();
             animationPackageInstaller = new AnimationPackageInstaller();
+            animationLibraryPaths = new AnimationLibraryPaths();
             behaviorPackageInstaller = new BehaviorPackageInstaller();
             boundsService = new DesktopPetBoundsService();
             contentCatalog = new FileSystemContentCatalog();
             modelLibraryPaths = new ModelLibraryPaths();
             modelFingerprintService = new ModelFingerprintService();
             modelImportService = new ModelImportService(modelLibraryPaths, contentCatalog, modelFingerprintService);
+            animationImportService = new AnimationImportService(animationLibraryPaths, contentCatalog, modelFingerprintService);
             modelLoader = new VrmModelLoaderService(characterRuntimeAssembler);
             fileDialogService = new StandaloneFileDialogService();
             settingsStore = new DesktopPetSettingsStore();
@@ -251,7 +258,8 @@ namespace VividSoul.Runtime.App
                     return;
                 }
 
-                await ApplyLocalAnimationPackageAsync(path, preferredEntryPath: path);
+                var managedPath = ImportLocalAnimationIntoLibraryIfNeeded(path);
+                await ApplyLocalAnimationPackageAsync(managedPath, preferredEntryPath: managedPath);
             }
             catch (Exception exception)
             {
@@ -365,7 +373,8 @@ namespace VividSoul.Runtime.App
         {
             try
             {
-                await ApplyLocalAnimationPackageAsync(path, preferredEntryPath: path);
+                var managedPath = ImportLocalAnimationIntoLibraryIfNeeded(path);
+                await ApplyLocalAnimationPackageAsync(managedPath, preferredEntryPath: managedPath);
             }
             catch (Exception exception)
             {
@@ -404,6 +413,11 @@ namespace VividSoul.Runtime.App
             LoadCachedModel(path);
         }
 
+        public void LoadManagedLocalAnimation(string path)
+        {
+            LoadLocalAnimationFromPath(path);
+        }
+
         public IReadOnlyList<ContentItem> GetManagedLocalModels()
         {
             EnsureServices();
@@ -411,6 +425,17 @@ namespace VividSoul.Runtime.App
             return contentCatalog!
                 .Scan(modelLibraryPaths!.RootPath, ContentSource.Local)
                 .Where(item => item.Type == ContentType.Model)
+                .OrderBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        public IReadOnlyList<ContentItem> GetManagedLocalAnimations()
+        {
+            EnsureServices();
+
+            return contentCatalog!
+                .Scan(animationLibraryPaths!.RootPath, ContentSource.Local)
+                .Where(item => item.Type == ContentType.Animation)
                 .OrderBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
@@ -423,6 +448,16 @@ namespace VividSoul.Runtime.App
             }
 
             return modelLibraryPaths.ContainsPath(Path.GetFullPath(path));
+        }
+
+        public bool CanDeleteManagedLocalAnimation(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || animationLibraryPaths == null)
+            {
+                return false;
+            }
+
+            return animationLibraryPaths.ContainsPath(Path.GetFullPath(path));
         }
 
         public bool IsCurrentModelPath(string path)
@@ -451,6 +486,24 @@ namespace VividSoul.Runtime.App
             }
 
             return modelLibraryPaths.GetDisplayRelativeItemDirectory(itemDirectory);
+        }
+
+        public string GetManagedLocalAnimationDisplayDirectory(string path)
+        {
+            EnsureServices();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("An animation path is required.", nameof(path));
+            }
+
+            var normalizedPath = Path.GetFullPath(path);
+            var itemDirectory = Path.GetDirectoryName(normalizedPath);
+            if (string.IsNullOrWhiteSpace(itemDirectory) || !animationLibraryPaths!.ContainsPath(itemDirectory))
+            {
+                return normalizedPath;
+            }
+
+            return animationLibraryPaths.GetDisplayRelativeItemDirectory(itemDirectory);
         }
 
         public void DeleteManagedLocalModel(string path)
@@ -495,6 +548,40 @@ namespace VividSoul.Runtime.App
             }
 
             cachedModelStore!.Forget(normalizedPath);
+        }
+
+        public void DeleteManagedLocalAnimation(string path)
+        {
+            EnsureServices();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("An animation path is required.", nameof(path));
+            }
+
+            var normalizedPath = Path.GetFullPath(path);
+            if (!animationLibraryPaths!.ContainsPath(normalizedPath))
+            {
+                throw new UserFacingException("当前只支持删除已导入动作库的本地 VRMA 动作。");
+            }
+
+            var itemDirectory = Path.GetDirectoryName(normalizedPath);
+            if (string.IsNullOrWhiteSpace(itemDirectory))
+            {
+                throw new InvalidOperationException("The animation library item directory could not be resolved.");
+            }
+
+            var normalizedItemDirectory = Path.GetFullPath(itemDirectory);
+            if (!animationLibraryPaths.ContainsPath(normalizedItemDirectory))
+            {
+                throw new InvalidOperationException("The target path is outside of the managed animation library.");
+            }
+
+            if (Directory.Exists(normalizedItemDirectory))
+            {
+                Directory.Delete(normalizedItemDirectory, recursive: true);
+            }
+
+            ManagedLocalAnimationsChanged?.Invoke();
         }
 
         public void QuitApplication()
@@ -992,12 +1079,14 @@ namespace VividSoul.Runtime.App
         {
             characterRuntimeAssembler ??= new CharacterRuntimeAssembler();
             animationPackageInstaller ??= new AnimationPackageInstaller();
+            animationLibraryPaths ??= new AnimationLibraryPaths();
             behaviorPackageInstaller ??= new BehaviorPackageInstaller();
             boundsService ??= new DesktopPetBoundsService();
             contentCatalog ??= new FileSystemContentCatalog();
             modelLibraryPaths ??= new ModelLibraryPaths();
             modelFingerprintService ??= new ModelFingerprintService();
             modelImportService ??= new ModelImportService(modelLibraryPaths, contentCatalog, modelFingerprintService);
+            animationImportService ??= new AnimationImportService(animationLibraryPaths, contentCatalog, modelFingerprintService);
             modelLoader ??= new VrmModelLoaderService(characterRuntimeAssembler);
             fileDialogService ??= new StandaloneFileDialogService();
             if (settingsStore == null)
@@ -1181,6 +1270,41 @@ namespace VividSoul.Runtime.App
             }
 
             return modelImportService!.Import(normalizedPath).Item.EntryPath;
+        }
+
+        private string ImportLocalAnimationIntoLibraryIfNeeded(string path)
+        {
+            EnsureServices();
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("An animation path is required.", nameof(path));
+            }
+
+            var normalizedPath = Path.GetFullPath(path);
+            if (!File.Exists(normalizedPath))
+            {
+                throw new FileNotFoundException("The animation file does not exist.", normalizedPath);
+            }
+
+            if (!string.Equals(Path.GetExtension(normalizedPath), ".vrma", StringComparison.OrdinalIgnoreCase))
+            {
+                return normalizedPath;
+            }
+
+            if (animationLibraryPaths!.ContainsPath(normalizedPath)
+                || InferContentSourceFromPath(normalizedPath) == ContentSource.BuiltIn)
+            {
+                return normalizedPath;
+            }
+
+            var importResult = animationImportService!.ImportFile(normalizedPath);
+            if (importResult.ImportedNewItem)
+            {
+                ManagedLocalAnimationsChanged?.Invoke();
+            }
+
+            return importResult.Item.EntryPath;
         }
 
         private async Task TryConfigureStartupAnimationPackageAsync()
