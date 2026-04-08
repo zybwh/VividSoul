@@ -23,7 +23,7 @@ namespace VividSoul.Editor
         private const string OutputBaseName = "Idle_UpperBody_Base_10s";
         private const int SampleFrameRate = 30;
         private const float SampleDurationSeconds = 10f;
-        private const string DefaultModelRelativePath = "Defaults/Models/3822753043679029706.vrm";
+        private const string DefaultModelRelativePath = "Defaults/Models/8329754995701333594.vrm";
         private const string DefaultPoseRelativePath = "Defaults/Animations/VRMA_MotionPack/VRMA_01.vrma";
 
         private static readonly HumanBodyBones[] DynamicBones =

@@ -19,8 +19,8 @@ namespace VividSoul.Runtime.Settings
     public sealed class DesktopPetSettingsStore : IDesktopPetSettingsStore
     {
         private const string FileName = "desktop-pet-settings.json";
-        private const string DefaultModelRelativePath = "Defaults/Models/3822753043679029706.vrm";
-        private const string DefaultModelDisplayName = "Default Character";
+        private const string DefaultModelRelativePath = "Defaults/Models/8329754995701333594.vrm";
+        private const string DefaultModelDisplayName = "Shiroko";
         private readonly string filePath;
 
         public DesktopPetSettingsStore(string? baseDirectory = null)
