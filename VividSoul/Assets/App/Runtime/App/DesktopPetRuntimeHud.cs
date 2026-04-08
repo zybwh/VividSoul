@@ -53,7 +53,6 @@ namespace VividSoul.Runtime.App
         private DesktopPetRuntimeController? runtimeController;
         private DesktopPetSpeechBubblePresenter? speechBubblePresenter;
         private DesktopPetChatOverlayPresenter? chatOverlayPresenter;
-        private DesktopPetFairyGuiChatPresenter? fairyGuiChatPresenter;
         private DesktopPetSettingsWindowPresenter? settingsWindowPresenter;
         private MateActionDispatcher? actionDispatcher;
         private float scheduledSubmenuCloseTime = float.PositiveInfinity;
@@ -76,10 +75,6 @@ namespace VividSoul.Runtime.App
             speechBubblePresenter = new DesktopPetSpeechBubblePresenter(boundsService);
             actionDispatcher = new MateActionDispatcher(runtimeController);
             chatOverlayPresenter = new DesktopPetChatOverlayPresenter(
-                ShowStatusMessage,
-                HandleChatMessageSubmitted,
-                () => runtimeController?.MarkConversationMessagesRead());
-            fairyGuiChatPresenter = new DesktopPetFairyGuiChatPresenter(
                 ShowStatusMessage,
                 HandleChatMessageSubmitted,
                 () => runtimeController?.MarkConversationMessagesRead());
@@ -108,7 +103,6 @@ namespace VividSoul.Runtime.App
             UpdateStatusMessageVisibility();
             speechBubblePresenter?.Update(Time.unscaledDeltaTime);
             chatOverlayPresenter?.Update(Time.unscaledDeltaTime);
-            fairyGuiChatPresenter?.Update(Time.unscaledDeltaTime);
             settingsWindowPresenter?.Update(Time.unscaledDeltaTime);
             DrainPendingConversationUiActions();
             runtimeController?.SetExpandedWindowMode(ShouldUseExpandedWindowMode());
@@ -147,7 +141,6 @@ namespace VividSoul.Runtime.App
             CancelChatRequest();
             speechBubblePresenter?.HideImmediate();
             chatOverlayPresenter?.Hide();
-            fairyGuiChatPresenter?.Hide();
             settingsWindowPresenter?.Hide();
             runtimeController?.SetExpandedWindowMode(false);
         }
@@ -166,11 +159,9 @@ namespace VividSoul.Runtime.App
             CancelChatRequest();
             speechBubblePresenter?.HideImmediate();
             chatOverlayPresenter?.Hide();
-            fairyGuiChatPresenter?.Hide();
             settingsWindowPresenter?.Hide();
             runtimeController?.SetExpandedWindowMode(false);
             chatOverlayPresenter?.Dispose();
-            fairyGuiChatPresenter?.Dispose();
             settingsWindowPresenter?.Dispose();
 
             if (uiCanvas != null)
@@ -216,11 +207,6 @@ namespace VividSoul.Runtime.App
             }
 
             if (chatOverlayPresenter != null && chatOverlayPresenter.BlocksBackgroundInteraction)
-            {
-                return;
-            }
-
-            if (fairyGuiChatPresenter != null && fairyGuiChatPresenter.BlocksBackgroundInteraction)
             {
                 return;
             }
@@ -314,11 +300,7 @@ namespace VividSoul.Runtime.App
             var chatLabel = chatOverlayPresenter != null && chatOverlayPresenter.UnreadCount > 0
                 ? $"聊天 ({chatOverlayPresenter.UnreadCount})"
                 : "聊天";
-            var chatV2Label = fairyGuiChatPresenter != null && fairyGuiChatPresenter.UnreadCount > 0
-                ? $"聊天 V2 ({fairyGuiChatPresenter.UnreadCount})"
-                : "聊天 V2";
             CreateMenuButton(contextMenuUi.ItemList, chatLabel, closeMenusOnClick: true, onClick: OpenChatOverlay);
-            CreateMenuButton(contextMenuUi.ItemList, chatV2Label, closeMenusOnClick: true, onClick: OpenChatOverlayV2);
             CreateMenuButton(contextMenuUi.ItemList, "角色库", closeMenusOnClick: true, onClick: OpenRoleLibrary);
             CreateMenuButton(contextMenuUi.ItemList, "添加角色", closeMenusOnClick: true, onClick: () =>
             {
@@ -652,7 +634,6 @@ namespace VividSoul.Runtime.App
             EnsureCanvasExists();
             runtimeController.RequestApplicationFocus();
             chatOverlayPresenter?.Collapse();
-            fairyGuiChatPresenter?.Hide();
             settingsWindowPresenter.ShowLlm(uiCanvas!);
         }
 
@@ -666,7 +647,6 @@ namespace VividSoul.Runtime.App
             EnsureCanvasExists();
             runtimeController.RequestApplicationFocus();
             chatOverlayPresenter?.Collapse();
-            fairyGuiChatPresenter?.Hide();
             settingsWindowPresenter.ShowGeneral(uiCanvas!);
         }
 
@@ -680,23 +660,7 @@ namespace VividSoul.Runtime.App
             EnsureCanvasExists();
             runtimeController.RequestApplicationFocus();
             settingsWindowPresenter?.Hide();
-            fairyGuiChatPresenter?.Hide();
             chatOverlayPresenter.Show(uiCanvas!);
-            runtimeController.MarkConversationMessagesRead();
-            _ = runtimeController.RefreshConversationBackendAsync();
-        }
-
-        private void OpenChatOverlayV2()
-        {
-            if (fairyGuiChatPresenter == null || runtimeController == null)
-            {
-                return;
-            }
-
-            runtimeController.RequestApplicationFocus();
-            settingsWindowPresenter?.Hide();
-            chatOverlayPresenter?.Collapse();
-            fairyGuiChatPresenter.Show();
             runtimeController.MarkConversationMessagesRead();
             _ = runtimeController.RefreshConversationBackendAsync();
         }
@@ -775,11 +739,9 @@ namespace VividSoul.Runtime.App
                 {
                     case ChatRole.User:
                         chatOverlayPresenter.AppendUserMessage(envelope.Message.Text);
-                        fairyGuiChatPresenter?.AppendUserMessage(envelope.Message.Text);
                         break;
                     case ChatRole.Assistant:
                         chatOverlayPresenter.AppendMateMessage(envelope.Message.Text);
-                        fairyGuiChatPresenter?.AppendMateMessage(envelope.Message.Text);
                         if (envelope.IsProactive)
                         {
                             ShowStatusMessage(envelope.Message.Text);
@@ -798,15 +760,9 @@ namespace VividSoul.Runtime.App
                             runtimeController.MarkConversationMessagesRead();
                         }
 
-                        if (fairyGuiChatPresenter?.IsVisible == true)
-                        {
-                            runtimeController.MarkConversationMessagesRead();
-                        }
-
                         break;
                     case ChatRole.System:
                         chatOverlayPresenter.AppendSystemMessage(envelope.Message.Text);
-                        fairyGuiChatPresenter?.AppendSystemMessage(envelope.Message.Text);
                         if (envelope.IsProactive)
                         {
                             ShowStatusMessage(envelope.Message.Text);
@@ -823,8 +779,6 @@ namespace VividSoul.Runtime.App
             {
                 chatOverlayPresenter?.SetRequestInFlight(status.IsRequestInFlight);
                 chatOverlayPresenter?.SetConversationStatus(status);
-                fairyGuiChatPresenter?.SetRequestInFlight(status.IsRequestInFlight);
-                fairyGuiChatPresenter?.SetConversationStatus(status);
             });
         }
 
@@ -864,20 +818,17 @@ namespace VividSoul.Runtime.App
         private bool ShouldUseExpandedWindowMode()
         {
             return (settingsWindowPresenter != null && settingsWindowPresenter.IsVisible)
-                   || (chatOverlayPresenter != null && chatOverlayPresenter.IsExpanded)
-                   || (fairyGuiChatPresenter?.IsVisible == true);
+                   || (chatOverlayPresenter != null && chatOverlayPresenter.IsExpanded);
         }
 
         private void AppendSystemMessageToChatPresenters(string message)
         {
             chatOverlayPresenter?.AppendSystemMessage(message);
-            fairyGuiChatPresenter?.AppendSystemMessage(message);
         }
 
         private void SetChatRequestInFlight(bool value)
         {
             chatOverlayPresenter?.SetRequestInFlight(value);
-            fairyGuiChatPresenter?.SetRequestInFlight(value);
         }
 
         private void EnsureEventSystemExists()
