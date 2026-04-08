@@ -91,8 +91,6 @@
 - Unified the runtime desktop window boundary path after live drag diagnostics: saved window restore, `EnsureVisible()`, and drag-time clamping now share the same monitor-space clamp helper, drag start normalizes any stale out-of-bounds window position before sampling cursor delta, and the old "window correction residual re-applies as model movement" path was removed for pre-existing invalid window offsets.
 - Refreshed the repository root `README.md` into a clearer bilingual `vividsoul` project overview, explicitly marked the repo as a `vibe coding` artifact, clarified that the first product goal is a usable `macOS` desktop pet + `AI` companion, and added a root-level `Apache-2.0` `LICENSE` for repository code while keeping third-party licenses separate.
 - Retargeted the built-in default model references from `3822753043679029706.vrm` to `8329754995701333594.vrm`, aligned the placeholder `StreamingAssets` metadata filename with that new default model target, and added `README.md` crediting the referenced `VRoid Hub` model page and contributor `Dairlsuta`.
-- Added a first independent `聊天 V2` runtime pilot using `FairyGUI`: the right-click menu now exposes a separate `聊天 V2` entry, the new window reuses the existing conversation send/state event flow without replacing the old `uGUI` chat, and opening either chat surface now hides the other to avoid overlap during the trial period.
-- Embedded `FairyGUI` as a local Unity package under `VividSoul/Packages/com.fairygui.gui`, added the runtime assembly reference, patched the Unity 6000 `TextEditor.isMultiline` compatibility break, and disabled the outdated package editor-only integration path so the runtime pilot can build reliably on the current editor version.
 
 ## Known Issues
 
@@ -126,4 +124,3 @@
 - Decide whether the next performance pass should prioritize full compact-window drag/scale polish, a user-facing `VRM` import quality selector in settings, or additional idle/render throttling after new CLI baselines are captured.
 - Continue Phase 4 by re-running the real local-provider reminder E2E suite on the new tool-call path, then decide whether reminder / memory judges should fully drop the legacy JSON parse compatibility fallback once the MiniMax behavior is confirmed stable.
 - Validate the first local `ActionIntentJudge` against a real configured provider, then decide whether built-in pose-only coverage is enough for Phase 3 or whether the next safe expansion should admit a curated subset of managed local actions.
-- Decide whether the new `FairyGUI`-based `聊天 V2` should remain a visual/interaction sandbox only, or become the seed of the planned unified runtime main panel that will later absorb `聊天 / 角色库` into the same container.
