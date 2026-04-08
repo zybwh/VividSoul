@@ -1,6 +1,7 @@
 Builds/
 downloads/
 tmp/
+third-party/
 Exports/VividSoul/logs/
 
 VividSoul/Library/
@@ -8,11 +9,3 @@ VividSoul/Logs/
 VividSoul/ProfilerCaptures/
 VividSoul/Builds/
 VividSoul/UserSettings/
-
-utsuwa/node_modules/
-utsuwa/.svelte-kit/
-utsuwa/.output/
-utsuwa/build/
-utsuwa/.vercel/
-utsuwa/.netlify/
-utsuwa/.wrangler/
