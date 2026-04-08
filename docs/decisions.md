@@ -49,3 +49,19 @@ This file records **durable** choices that should not be re-litigated on every c
 
 **Consequences:** Prefer this local skill in this workspace when it overlaps with a global copy.
 
+## D-006 — AI-only code contribution provenance
+
+**Context:** The repository is intentionally operated as an AI-first `vibe coding` project, which makes provenance and review context part of the product process rather than optional metadata.
+
+**Decision:** This project accepts code changes only when they are generated or primarily driven by an AI coding agent. Every commit or pull request must include explicit `coding agent + model` attribution metadata.
+
+**Recommended format:**
+
+- `[agent: Cursor][model: GPT-5.4]`
+
+**Consequences:**
+
+- Commits without agent/model attribution are out of policy for this repository
+- PRs should include the same attribution in the title or clearly in the body
+- Reviewers should interpret the attribution as provenance metadata, not as a quality guarantee
+
