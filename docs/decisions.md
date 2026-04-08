@@ -65,3 +65,15 @@ This file records **durable** choices that should not be re-litigated on every c
 - PRs should include the same attribution in the title or clearly in the body
 - Reviewers should interpret the attribution as provenance metadata, not as a quality guarantee
 
+## D-007 — Issue-first, agent-executed implementation flow
+
+**Context:** This repository uses `vibe coding` as a product workflow, where the human side is expected to provide ideas, goals, and acceptance signals rather than personally carrying technical implementation.
+
+**Decision:** New work should be described through issues first, with goals, expected outcomes, constraints, and acceptance criteria. Implementation is then primarily executed by AI coding agents instead of relying on humans to directly author the technical changes.
+
+**Consequences:**
+
+- Discussion should bias toward intent and acceptance, not early implementation detail
+- Agents are the default execution path for turning issues into code
+- The repository should document project-local skills and execution affordances that help agents complete common tasks
+

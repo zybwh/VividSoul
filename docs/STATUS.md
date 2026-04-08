@@ -94,6 +94,8 @@
 - Reframed the root `README` into a more project-front-page style overview with a stronger product hook, an explicit `vibe coding` risk notice covering code-quality and wheel-reinvention risks, and a new AI-only contribution protocol requiring `coding agent + model` attribution in commits or PRs.
 - Trimmed the root `README` again to keep the landing page focused on the active product narrative instead of foregrounding legacy/reference-project context.
 - Rebuilt the root `README` landing experience again with a stronger front-page structure: centered hero copy, lightweight status badges, a sharper "why this is different" section, quick links near the top, and the collaboration/risk policy moved into a more product-like narrative flow.
+- Revised the root `README` again to better match the intended repo workflow: aligned the landing header/link presentation, replaced mixed-language section titles, redefined `vibe coding` as a human-ideas / agent-implementation split, added an issue-first execution explanation plus project-local skill links, and removed the stale idle-bake export command from the quick command list.
+- Standardized the public-facing product name in the root `README` files to `VividSoul` while keeping the repository slug lowercase, so the landing page brand presentation matches the Unity project name.
 - Retargeted the built-in default model references from `3822753043679029706.vrm` to `8329754995701333594.vrm`, aligned the placeholder `StreamingAssets` metadata filename with that new default model target, and added `README.md` crediting the referenced `VRoid Hub` model page and contributor `Dairlsuta`.
 
 ## Known Issues

@@ -1,6 +1,8 @@
-# vividsoul
+<h1 align="center">VividSoul</h1>
 
-[中文 README](README.md)
+<p align="center">
+  <a href="README.md">中文 README</a>
+</p>
 
 <p align="center">
   <strong>A native desktop character, not a chatbot wrapped in a window.</strong><br/>
@@ -16,11 +18,11 @@
   <img alt="policy" src="https://img.shields.io/badge/contrib-AI%20only-0f766e" />
 </p>
 
-`vividsoul` is not trying to be another web chat shell. It is trying to become a character system that can actually live on the desktop: imported, clicked, dragged, spoken with, remembered, and felt as a persistent presence.
+`VividSoul` is not trying to be another web chat shell. It is trying to become a character system that can actually live on the desktop: imported, clicked, dragged, spoken with, remembered, and felt as a persistent presence.
 
 The active track is to converge those capabilities into a genuinely usable native `macOS` experience, with the main implementation under `VividSoul/`.
 
-## Why It Hits Different
+## What Makes It Different
 
 - It puts `AI` inside a desktop character instead of putting a character skin around a chat box
 - It treats presence as a first-class product quality, alongside actions, state, reminders, and proactivity
@@ -43,17 +45,31 @@ Right now, the first phase is focused on four things:
 - Architecture: `docs/architecture.md`
 - Main Unity project: `VividSoul/`
 
-## Vibe Coding Notice
+## How Vibe Coding Works Here
 
-This repository explicitly runs on a `vibe coding` workflow: get the experience loop, interaction feel, and system boundaries working first, then harden the abstractions, architecture, and engineering quality afterward.
+In this repository, `vibe coding` does not mean random implementation. It means a different division of labor:
 
-That also means you should assume the following risks are real:
+- I mainly throw out ideas, goals, and product judgment instead of personally handling technical implementation
+- Concrete implementation is expected to be executed by `AI Agents`
+- That makes iteration faster, but it also means the related risks must be treated as real
+
+So you should assume the following risks are real:
 
 - Code quality risk: some implementations prioritize iteration speed over ideal structure or robustness
 - Reinventing-the-wheel risk: similar capabilities may be implemented more than once before the design fully settles
 - Refactor churn risk: paths that work today may later be merged, replaced, or removed
 
-So the right mental model for this repo is not "finished architecture", but "a live prototype with clear product intent".
+The right mental model for this repo is not "finished architecture", but "a live prototype where humans drive intent and AI drives implementation".
+
+## How To Propose Ideas
+
+If you have a new idea, feature request, or change proposal, the preferred path is to describe it through an `issue` instead of starting from implementation details.
+
+- Use the `issue` to describe the goal, desired outcome, constraints, and acceptance criteria
+- Let an `AI Agent` execute and implement from that issue
+- If the result is off, keep iterating by adding feedback and letting the agent refine it
+
+This repository is intentionally optimized for "humans provide direction, agents do the implementation work".
 
 ## Contribution Protocol
 
@@ -73,7 +89,7 @@ feat: add local reminder retry path [agent: Cursor][model: GPT-5.4]
 
 For `PR`s, the same attribution can appear in the title or clearly in the body. Changes without this marker are considered out of policy for this repository.
 
-## Repository Map
+## Repository Layout
 
 The repository root is the coordination layer, while the main Unity project lives in `VividSoul/`.
 
@@ -88,10 +104,16 @@ The repository root is the coordination layer, while the main Unity project live
 | `tmp/` | Temporary screenshots and scratch files |
 | `scripts/` | Repository scripts for build, export, and cleanup workflows |
 
+## Available Skills
+
+This repository already includes project-local skills that `AI Agents` can use directly:
+
+- `./.cursor/skills/vrm-model-rigging/`: VRM rigging, expressions, and export workflows
+- `./.cursor/skills/vrma-motion-authoring/`: VRMA motion authoring, debugging, and export workflows
+
 ## Common Commands
 
 - macOS batch build: `scripts/build-vividsoul.sh`
-- Idle bake export: `scripts/export-vrma-idle-bake.sh`
 - Clear temporary files: `scripts/cleanup-temp.sh`
 
 See `scripts/README.md` for environment variables and troubleshooting details.

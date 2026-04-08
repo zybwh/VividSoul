@@ -1,6 +1,8 @@
-# vividsoul
+<h1 align="center">VividSoul</h1>
 
-[English README](README.en.md)
+<p align="center">
+  <a href="README.en.md">English README</a>
+</p>
 
 <p align="center">
   <strong>一个原生桌面角色，而不是聊天框套壳。</strong><br/>
@@ -16,11 +18,11 @@
   <img alt="policy" src="https://img.shields.io/badge/contrib-AI%20only-0f766e" />
 </p>
 
-`vividsoul` 想做的不是另一个网页聊天壳，而是一个真的能住在桌面上的角色系统：能被导入、被点击、被拖动、会说话、会记事、会提醒你，也会在屏幕边缘持续“存在”。
+`VividSoul` 想做的不是另一个网页聊天壳，而是一个真的能住在桌面上的角色系统：能被导入、被点击、被拖动、会说话、会记事、会提醒你，也会在屏幕边缘持续“存在”。
 
 现阶段主线是把这些能力收敛成一个能在 `macOS` 上真实使用的原生体验，主实现位于 `VividSoul/`。
 
-## Why It Hits Different
+## 它和普通 AI 产品不一样的地方
 
 - 它把 `AI` 放进桌面角色里，而不是把角色塞进聊天框里
 - 它强调“存在感”而不是单轮问答，动作、状态、提醒和主动性都是一等能力
@@ -43,17 +45,31 @@
 - 技术架构：`docs/architecture.md`
 - Unity 主项目：`VividSoul/`
 
-## Vibe Coding Notice
+## Vibe Coding 工作方式
 
-这个仓库明确采用 `vibe coding` 驱动：先快速把体验闭环、交互感觉和系统边界跑通，再逐步补抽象、收口架构和工程化质量。
+这个仓库里的 `vibe coding`，核心不是“先乱做再说”，而是分工方式的改变：
 
-这同时意味着你应该默认以下风险存在：
+- 我只负责抛想法、提目标、给体验判断，不亲自承担具体技术实现
+- 具体实现默认交给 `AI Agent` 来执行、改代码、跑流程和收敛结果
+- 因为实现过程主要由 agent 推进，所以速度会更快，但也必须正视对应风险
+
+这意味着你应该默认以下风险存在：
 
 - 代码质量风险：部分实现优先服务验证速度，而不是最稳健或最优雅的结构
 - 重复造轮子风险：相近能力可能在统一方案落地前被临时实现多次
 - 架构回收风险：当前可用路径后续可能被整体合并、替换或删除
 
-所以看这个仓库时，最好把它理解成“有明确产品方向的活原型”，而不是已经冻结形态的最终工程。
+所以看这个仓库时，最好把它理解成“由想法驱动、由 AI 实现的活原型”，而不是已经冻结形态的最终工程。
+
+## 如何提出想法
+
+如果你对项目有新想法、改动建议或功能需求，推荐直接通过 `issue` 来描述，而不是先讨论具体技术怎么写。
+
+- 在 `issue` 里写清楚目标、想要的效果、限制条件和验收标准
+- `AI Agent` 根据 `issue` 自动执行和实现
+- 如果实现结果不对，再继续追加反馈，让 agent 迭代
+
+这个仓库更偏向“人提方向，agent 落地”。
 
 ## Contribution Protocol
 
@@ -73,7 +89,7 @@ feat: add local reminder retry path [agent: Cursor][model: GPT-5.4]
 
 如果使用 `PR`，也可以把同样的标记放在标题或正文显眼位置。没有这类标记的变更，默认视为不符合仓库协作约定。
 
-## Repository Map
+## 仓库结构
 
 仓库根目录是协作层，主 Unity 项目位于 `VividSoul/`。
 
@@ -88,10 +104,16 @@ feat: add local reminder retry path [agent: Cursor][model: GPT-5.4]
 | `tmp/` | 临时截图和草稿文件 |
 | `scripts/` | 构建、导出、清理等仓库脚本 |
 
+## 可用 Skills
+
+当前仓库已经提供了项目内技能，方便 `AI Agent` 直接调用：
+
+- `./.cursor/skills/vrm-model-rigging/`：用于 `VRM` 模型绑定、表情和导出
+- `./.cursor/skills/vrma-motion-authoring/`：用于 `VRMA` 动作制作、调试和导出
+
 ## 常用命令
 
 - `macOS` 批量构建：`scripts/build-vividsoul.sh`
-- 导出待机烘焙资源：`scripts/export-vrma-idle-bake.sh`
 - 清理临时文件：`scripts/cleanup-temp.sh`
 
 更多环境变量和排障说明见 `scripts/README.md`。
