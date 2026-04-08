@@ -43,6 +43,11 @@ namespace VividSoul.Runtime.App
             }
         }
 
+        public static string GetFairyGuiFontFamilyChain()
+        {
+            return string.Join(", ", SystemFontCandidates);
+        }
+
         private static Font? TryCreateSystemFont(int preferredPointSize)
         {
             var availableFonts = GetInstalledFontNames();

@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using Kirurobo;
 using UnityEngine;
 
@@ -9,6 +10,7 @@ namespace VividSoul.Runtime.Platform
     public sealed class UniWindowWindowService : IWindowService
     {
         private readonly GameObject hostObject;
+        private readonly Dictionary<int, Vector2> monitorVerticalInsets = new();
         private bool clickThroughWasEnabled;
         private bool clickThroughLocked;
         private UniWindowController? controller;
@@ -28,6 +30,16 @@ namespace VividSoul.Runtime.Platform
 
         public int MonitorCount => UniWindowController.GetMonitorCount();
 
+        public Rect GetMonitorRect(int monitorIndex) => UniWindowController.GetMonitorRect(monitorIndex);
+
+        public Vector2 CursorPosition => UniWindowController.GetCursorPosition();
+
+        public Vector2 ClientSize => ResolveController().clientSize;
+
+        public Vector2 WindowPosition => ResolveController().windowPosition;
+
+        public Vector2 WindowSize => ResolveController().windowSize;
+
         public void Configure(Camera? camera)
         {
             var resolved = ResolveController();
@@ -45,7 +57,7 @@ namespace VividSoul.Runtime.Platform
             resolved.forceWindowed = true;
             resolved.isTransparent = true;
             resolved.SetTransparentType(UniWindowController.TransparentType.Alpha);
-            resolved.hitTestType = UniWindowController.HitTestType.Opacity;
+            resolved.hitTestType = UniWindowController.HitTestType.Raycast;
             resolved.opacityThreshold = 0.1f;
             resolved.allowDropFiles = false;
 
@@ -81,6 +93,74 @@ namespace VividSoul.Runtime.Platform
             resolved.monitorToFit = sanitizedIndex;
             resolved.shouldFitMonitor = true;
             EnsureVisible();
+            CaptureVisibleMonitorInsets(sanitizedIndex, resolved);
+        }
+
+        public void SetWindowPosition(Vector2 position)
+        {
+            var resolved = ResolveController();
+            if ((resolved.windowPosition - position).sqrMagnitude <= 0.0001f)
+            {
+                return;
+            }
+
+            resolved.shouldFitMonitor = false;
+            resolved.isZoomed = false;
+            resolved.windowPosition = position;
+        }
+
+        public void SetWindowSize(Vector2 size)
+        {
+            var resolved = ResolveController();
+            if ((resolved.windowSize - size).sqrMagnitude <= 0.0001f)
+            {
+                return;
+            }
+
+            resolved.shouldFitMonitor = false;
+            resolved.isZoomed = false;
+            resolved.windowSize = size;
+        }
+
+        public void SetWindowRect(Rect rect)
+        {
+            var resolved = ResolveController();
+            resolved.shouldFitMonitor = false;
+            resolved.isZoomed = false;
+            resolved.windowSize = rect.size;
+            resolved.windowPosition = rect.position;
+        }
+
+        public Vector2 ClampWindowPositionToMonitor(Vector2 position, int monitorIndex)
+        {
+            var resolved = ResolveController();
+            var monitorCount = MonitorCount;
+            if (monitorCount <= 0)
+            {
+                return position;
+            }
+
+            var sanitizedIndex = Mathf.Clamp(monitorIndex, 0, monitorCount - 1);
+            var monitorRect = NormalizeMonitorRect(sanitizedIndex, UniWindowController.GetMonitorRect(sanitizedIndex));
+            if (monitorRect == Rect.zero)
+            {
+                return position;
+            }
+
+            var windowSize = resolved.windowSize;
+            var maxX = Mathf.Max(monitorRect.xMin, monitorRect.xMax - windowSize.x);
+            var minY = monitorRect.yMin;
+            var maxYLimit = monitorRect.yMax;
+            if (monitorVerticalInsets.TryGetValue(sanitizedIndex, out var verticalInsets))
+            {
+                minY += verticalInsets.x;
+                maxYLimit -= verticalInsets.y;
+            }
+
+            var maxY = Mathf.Max(minY, maxYLimit - windowSize.y);
+            return new Vector2(
+                Mathf.Clamp(position.x, monitorRect.xMin, maxX),
+                Mathf.Clamp(position.y, minY, maxY));
         }
 
         public void RequestApplicationFocus()
@@ -98,22 +178,7 @@ namespace VividSoul.Runtime.Platform
             }
 
             var monitorIndex = Mathf.Clamp(resolved.monitorToFit, 0, monitorCount - 1);
-            var monitorRect = UniWindowController.GetMonitorRect(monitorIndex);
-            if (monitorRect == Rect.zero)
-            {
-                return;
-            }
-
-            var windowPosition = resolved.windowPosition;
-            if (monitorRect.Contains(windowPosition))
-            {
-                return;
-            }
-
-            var windowSize = resolved.windowSize;
-            resolved.windowPosition = new Vector2(
-                monitorRect.center.x - (windowSize.x * 0.5f),
-                monitorRect.center.y - (windowSize.y * 0.5f));
+            resolved.windowPosition = ClampWindowPositionToMonitor(resolved.windowPosition, monitorIndex);
         }
 
         public T RunWithTopMostDisabled<T>(Func<T> action)
@@ -154,13 +219,37 @@ namespace VividSoul.Runtime.Platform
                 return;
             }
 
-            resolved.hitTestType = UniWindowController.HitTestType.Opacity;
+            resolved.hitTestType = UniWindowController.HitTestType.Raycast;
             resolved.isHitTestEnabled = true;
             if (clickThroughWasEnabled)
             {
                 resolved.isClickThrough = false;
                 clickThroughWasEnabled = false;
             }
+        }
+
+        private void CaptureVisibleMonitorInsets(int monitorIndex, UniWindowController resolved)
+        {
+            var monitorRect = NormalizeMonitorRect(monitorIndex, UniWindowController.GetMonitorRect(monitorIndex));
+            if (monitorRect == Rect.zero)
+            {
+                return;
+            }
+
+            var fittedRect = new Rect(resolved.windowPosition, resolved.windowSize);
+            var bottomInset = Mathf.Max(0f, fittedRect.yMin - monitorRect.yMin);
+            var topInset = Mathf.Max(0f, monitorRect.yMax - fittedRect.yMax);
+            monitorVerticalInsets[monitorIndex] = new Vector2(bottomInset, topInset);
+        }
+
+        private static Rect NormalizeMonitorRect(int monitorIndex, Rect monitorRect)
+        {
+            if (monitorRect == Rect.zero || monitorIndex != 0)
+            {
+                return monitorRect;
+            }
+
+            return new Rect(0f, 0f, monitorRect.width, monitorRect.height);
         }
 
         private UniWindowController ResolveController()

@@ -2,6 +2,8 @@
 
 # Reference project
 utsuwa/
+# Cloned third-party Unity project (not this repo's source)
+Mate-Engine/
 
 # Root-level generated and temporary directories
 Builds/

@@ -15,6 +15,16 @@ namespace VividSoul.Runtime.Platform
 
         int MonitorCount { get; }
 
+        Rect GetMonitorRect(int monitorIndex);
+
+        Vector2 CursorPosition { get; }
+
+        Vector2 ClientSize { get; }
+
+        Vector2 WindowPosition { get; }
+
+        Vector2 WindowSize { get; }
+
         void Configure(Camera? camera);
 
         void SetTopMost(bool enabled);
@@ -24,6 +34,14 @@ namespace VividSoul.Runtime.Platform
         void MoveToMonitor(int monitorIndex);
 
         void FitToMonitor(int monitorIndex);
+
+        void SetWindowPosition(Vector2 position);
+
+        void SetWindowSize(Vector2 size);
+
+        void SetWindowRect(Rect rect);
+
+        Vector2 ClampWindowPositionToMonitor(Vector2 position, int monitorIndex);
 
         void EnsureVisible();
 

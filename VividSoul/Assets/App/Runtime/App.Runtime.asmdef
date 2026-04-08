@@ -2,6 +2,7 @@
   "name": "VividSoul.Runtime",
   "rootNamespace": "VividSoul.Runtime",
   "references": [
+    "FairyGUI",
     "Kirurobo.UniWindowController",
     "StandaloneFileBrowser",
     "Steamworks.NET.Manager",

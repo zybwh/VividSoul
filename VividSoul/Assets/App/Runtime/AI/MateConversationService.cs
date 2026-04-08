@@ -116,6 +116,16 @@ namespace VividSoul.Runtime.AI
             activeBackend?.MarkMessagesRead();
         }
 
+        public void Tick(float unscaledTime)
+        {
+            activeBackend?.Tick(unscaledTime);
+        }
+
+        public void NotifyApplicationFocus(bool hasFocus)
+        {
+            activeBackend?.NotifyApplicationFocus(hasFocus);
+        }
+
         public void Dispose()
         {
             localBackend.Dispose();

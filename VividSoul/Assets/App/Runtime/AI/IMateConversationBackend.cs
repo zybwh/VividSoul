@@ -30,5 +30,9 @@ namespace VividSoul.Runtime.AI
         Task DeactivateAsync(CancellationToken cancellationToken);
 
         void MarkMessagesRead();
+
+        void Tick(float unscaledTime);
+
+        void NotifyApplicationFocus(bool hasFocus);
     }
 }

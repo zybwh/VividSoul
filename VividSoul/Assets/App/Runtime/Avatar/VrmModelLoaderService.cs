@@ -4,18 +4,22 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using UniGLTF;
 using UniVRM10;
 using UnityEngine;
+using VividSoul.Runtime.Settings;
 
 namespace VividSoul.Runtime.Avatar
 {
     public sealed class VrmModelLoaderService : IModelLoader
     {
         private readonly CharacterRuntimeAssembler characterRuntimeAssembler;
+        private readonly IDesktopPetSettingsStore settingsStore;
 
-        public VrmModelLoaderService(CharacterRuntimeAssembler characterRuntimeAssembler)
+        public VrmModelLoaderService(CharacterRuntimeAssembler characterRuntimeAssembler, IDesktopPetSettingsStore settingsStore)
         {
             this.characterRuntimeAssembler = characterRuntimeAssembler ?? throw new ArgumentNullException(nameof(characterRuntimeAssembler));
+            this.settingsStore = settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
         }
 
         public async Task<ModelLoadResult> LoadAsync(string path, Transform parent, CancellationToken cancellationToken = default)
@@ -42,11 +46,13 @@ namespace VividSoul.Runtime.Avatar
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            var importSettings = settingsStore.Load();
             var instance = await Vrm10.LoadPathAsync(
                 path,
                 canLoadVrm0X: true,
                 controlRigGenerationOption: ControlRigGenerationOption.Generate,
                 showMeshes: true,
+                textureDeserializer: CreateTextureDeserializer(importSettings.VrmImportPerformanceMode),
                 ct: cancellationToken);
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -70,6 +76,17 @@ namespace VividSoul.Runtime.Avatar
             var thumbnail = meta != null ? meta.Thumbnail : null;
 
             return new ModelLoadResult(path, root, displayName, author, version, thumbnail);
+        }
+
+        private static ITextureDeserializer? CreateTextureDeserializer(VrmImportPerformanceMode performanceMode)
+        {
+            return performanceMode switch
+            {
+                VrmImportPerformanceMode.Original => null,
+                VrmImportPerformanceMode.Balanced => new RuntimeScaledTextureDeserializer(2048),
+                VrmImportPerformanceMode.MemorySaver => new RuntimeScaledTextureDeserializer(1024),
+                _ => new RuntimeScaledTextureDeserializer(2048),
+            };
         }
     }
 }

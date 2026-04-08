@@ -1,5 +1,7 @@
 #nullable enable
 
+using VividSoul.Runtime.Avatar;
+
 namespace VividSoul.Runtime.Settings
 {
     public sealed record DesktopPetSettingsData(
@@ -14,5 +16,10 @@ namespace VividSoul.Runtime.Settings
         int MonitorIndex,
         float VoiceVolume,
         bool HeadFollowEnabled,
-        bool HandFollowEnabled);
+        bool HandFollowEnabled,
+        bool CompactWindowEnabled,
+        bool HasWindowPosition,
+        float WindowPositionX,
+        float WindowPositionY,
+        VrmImportPerformanceMode VrmImportPerformanceMode);
 }

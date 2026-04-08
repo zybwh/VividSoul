@@ -48,3 +48,4 @@ This file records **durable** choices that should not be re-litigated on every c
 **Decision:** Keep a project-local skill under `.cursor/skills/vrma-motion-authoring/` with output paths aligned to this repo layout.
 
 **Consequences:** Prefer this local skill in this workspace when it overlaps with a global copy.
+

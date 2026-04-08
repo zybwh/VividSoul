@@ -14,8 +14,8 @@ namespace VividSoul.Runtime.Interaction
         [SerializeField] private float maxScale = 2.5f;
         [SerializeField, Range(0.02f, 0.4f)] private float minViewportWidthRatio = 0.08f;
         [SerializeField, Range(0.05f, 0.6f)] private float minViewportHeightRatio = 0.18f;
-        [SerializeField, Range(0.25f, 0.95f)] private float maxViewportWidthRatio = 0.5f;
-        [SerializeField, Range(0.25f, 0.95f)] private float maxViewportHeightRatio = 0.78f;
+        [SerializeField, Range(0.25f, 0.95f)] private float maxViewportWidthRatio = 0.72f;
+        [SerializeField, Range(0.25f, 0.95f)] private float maxViewportHeightRatio = 0.92f;
         [SerializeField, Range(0f, 0.25f)] private float viewportPadding = 0.02f;
         [SerializeField] private bool requirePointerOverModel = true;
 

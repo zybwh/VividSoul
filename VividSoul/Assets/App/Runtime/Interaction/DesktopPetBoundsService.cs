@@ -1,12 +1,16 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 namespace VividSoul.Runtime.Interaction
 {
     public sealed class DesktopPetBoundsService
     {
+        private Mesh? bakedMeshScratch;
+
         public readonly struct ModelScaleLimits
         {
             public ModelScaleLimits(float minScale, float maxScale)
@@ -131,12 +135,7 @@ namespace VividSoul.Runtime.Interaction
                 throw new ArgumentNullException(nameof(modelRoot));
             }
 
-            if (!TryGetWorldBounds(modelRoot, out var bounds))
-            {
-                return ClampWorldPosition(camera, desiredWorldPosition, viewportPadding);
-            }
-
-            if (!TryGetViewportRect(camera, bounds, out var viewportRect))
+            if (!TryGetViewportRect(camera, modelRoot, out var viewportRect))
             {
                 return ClampWorldPosition(camera, desiredWorldPosition, viewportPadding);
             }
@@ -152,6 +151,28 @@ namespace VividSoul.Runtime.Interaction
                 currentViewportPosition.x + clampedDelta.x,
                 currentViewportPosition.y + clampedDelta.y,
                 GetDepth(camera, modelRoot.transform)));
+        }
+
+        public Vector3 MoveModelByScreenDelta(Camera camera, GameObject modelRoot, Vector2 screenDelta, float viewportPadding)
+        {
+            if (camera == null)
+            {
+                throw new ArgumentNullException(nameof(camera));
+            }
+
+            if (modelRoot == null)
+            {
+                throw new ArgumentNullException(nameof(modelRoot));
+            }
+
+            var modelScreenPosition = camera.WorldToScreenPoint(modelRoot.transform.position);
+            var depth = GetDepth(camera, modelRoot.transform);
+            var targetWorldPosition = camera.ScreenToWorldPoint(new Vector3(
+                modelScreenPosition.x + screenDelta.x,
+                modelScreenPosition.y + screenDelta.y,
+                depth));
+            targetWorldPosition.z = modelRoot.transform.position.z;
+            return ClampModelWorldPosition(camera, modelRoot, targetWorldPosition, viewportPadding);
         }
 
         public float GetDepth(Camera camera, Transform modelTransform)
@@ -172,13 +193,7 @@ namespace VividSoul.Runtime.Interaction
 
         public bool TryGetScreenRect(Camera camera, GameObject modelRoot, out Rect screenRect)
         {
-            if (!TryGetWorldBounds(modelRoot, out var bounds))
-            {
-                screenRect = default;
-                return false;
-            }
-
-            if (!TryGetViewportRect(camera, bounds, out var viewportRect))
+            if (!TryGetViewportRect(camera, modelRoot, out var viewportRect))
             {
                 screenRect = default;
                 return false;
@@ -192,6 +207,110 @@ namespace VividSoul.Runtime.Interaction
             return true;
         }
 
+        private bool TryGetViewportRect(Camera camera, GameObject modelRoot, out Rect viewportRect)
+        {
+            if (camera == null)
+            {
+                throw new ArgumentNullException(nameof(camera));
+            }
+
+            if (modelRoot == null)
+            {
+                throw new ArgumentNullException(nameof(modelRoot));
+            }
+
+            var min = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+            var max = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
+            var hasViewportPoint = false;
+            var renderers = modelRoot.GetComponentsInChildren<Renderer>(true);
+            foreach (var renderer in renderers)
+            {
+                if (!renderer.enabled)
+                {
+                    continue;
+                }
+
+                if (!TryGetRendererViewportRect(camera, renderer, out var rendererViewportRect))
+                {
+                    continue;
+                }
+
+                min = Vector2.Min(min, rendererViewportRect.min);
+                max = Vector2.Max(max, rendererViewportRect.max);
+                hasViewportPoint = true;
+            }
+
+            if (!hasViewportPoint)
+            {
+                if (!TryGetWorldBounds(modelRoot, out var bounds))
+                {
+                    viewportRect = default;
+                    return false;
+                }
+
+                return TryGetViewportRect(camera, bounds, out viewportRect);
+            }
+
+            viewportRect = Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+            return true;
+        }
+
+        public string DescribeRightEdgeContributors(Camera camera, GameObject modelRoot, int maxEntries = 3)
+        {
+            if (camera == null)
+            {
+                throw new ArgumentNullException(nameof(camera));
+            }
+
+            if (modelRoot == null)
+            {
+                throw new ArgumentNullException(nameof(modelRoot));
+            }
+
+            var entries = new List<(string Name, Rect ScreenRect)>();
+            var renderers = modelRoot.GetComponentsInChildren<Renderer>(true);
+            foreach (var renderer in renderers)
+            {
+                if (!renderer.enabled || !TryGetRendererViewportRect(camera, renderer, out var viewportRect))
+                {
+                    continue;
+                }
+
+                entries.Add((
+                    renderer.name,
+                    Rect.MinMaxRect(
+                        viewportRect.xMin * Screen.width,
+                        viewportRect.yMin * Screen.height,
+                        viewportRect.xMax * Screen.width,
+                        viewportRect.yMax * Screen.height)));
+            }
+
+            if (entries.Count == 0)
+            {
+                return "none";
+            }
+
+            entries.Sort((left, right) => right.ScreenRect.xMax.CompareTo(left.ScreenRect.xMax));
+            var builder = new StringBuilder();
+            var count = Mathf.Min(Mathf.Max(maxEntries, 1), entries.Count);
+            for (var i = 0; i < count; i++)
+            {
+                var entry = entries[i];
+                if (i > 0)
+                {
+                    builder.Append(", ");
+                }
+
+                builder.Append(entry.Name);
+                builder.Append(':');
+                builder.Append(entry.ScreenRect.xMax.ToString("F2"));
+                builder.Append('/');
+                builder.Append(entry.ScreenRect.width.ToString("F2"));
+            }
+
+            return builder.ToString();
+        }
+
         private static bool TryGetViewportRect(Camera camera, Bounds bounds, out Rect viewportRect)
         {
             var min = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
@@ -199,14 +318,7 @@ namespace VividSoul.Runtime.Interaction
 
             foreach (var corner in EnumerateCorners(bounds))
             {
-                var viewportPoint = camera.WorldToViewportPoint(corner);
-                if (viewportPoint.z <= 0f)
-                {
-                    continue;
-                }
-
-                min = Vector2.Min(min, viewportPoint);
-                max = Vector2.Max(max, viewportPoint);
+                TryAccumulateViewportPoint(camera, corner, ref min, ref max);
             }
 
             if (!float.IsFinite(min.x) || !float.IsFinite(min.y) || !float.IsFinite(max.x) || !float.IsFinite(max.y))
@@ -231,6 +343,83 @@ namespace VividSoul.Runtime.Interaction
             var minDelta = padding - currentMin;
             var maxDelta = (1f - padding) - currentMax;
             return Mathf.Clamp(desiredDelta, minDelta, maxDelta);
+        }
+
+        private bool TryGetRendererViewportRect(Camera camera, Renderer renderer, out Rect viewportRect)
+        {
+            if (TryGetRendererLocalBounds(renderer, out var localBounds))
+            {
+                var min = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+                var max = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
+                var localToWorldMatrix = renderer.transform.localToWorldMatrix;
+                foreach (var corner in EnumerateCorners(localBounds))
+                {
+                    var worldCorner = localToWorldMatrix.MultiplyPoint3x4(corner);
+                    TryAccumulateViewportPoint(camera, worldCorner, ref min, ref max);
+                }
+
+                if (float.IsFinite(min.x) && float.IsFinite(min.y) && float.IsFinite(max.x) && float.IsFinite(max.y))
+                {
+                    viewportRect = Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+                    return true;
+                }
+            }
+
+            return TryGetViewportRect(camera, renderer.bounds, out viewportRect);
+        }
+
+        private bool TryGetRendererLocalBounds(Renderer renderer, out Bounds localBounds)
+        {
+            switch (renderer)
+            {
+                case SkinnedMeshRenderer skinnedMeshRenderer when skinnedMeshRenderer.sharedMesh != null:
+                    var bakedMesh = GetOrCreateBakedMeshScratch();
+                    bakedMesh.Clear();
+                    skinnedMeshRenderer.BakeMesh(bakedMesh);
+                    bakedMesh.RecalculateBounds();
+                    localBounds = bakedMesh.bounds;
+                    return true;
+                case MeshRenderer meshRenderer when meshRenderer.TryGetComponent<MeshFilter>(out var meshFilter) && meshFilter.sharedMesh != null:
+                    localBounds = meshFilter.sharedMesh.bounds;
+                    return true;
+                default:
+                    localBounds = default;
+                    return false;
+            }
+        }
+
+        private static bool TryAccumulateViewportPoint(
+            Camera camera,
+            Vector3 worldPoint,
+            ref Vector2 min,
+            ref Vector2 max)
+        {
+            var viewportPoint = camera.WorldToViewportPoint(worldPoint);
+            if (viewportPoint.z <= 0f
+                || !float.IsFinite(viewportPoint.x)
+                || !float.IsFinite(viewportPoint.y))
+            {
+                return false;
+            }
+
+            min = Vector2.Min(min, viewportPoint);
+            max = Vector2.Max(max, viewportPoint);
+            return true;
+        }
+
+        private Mesh GetOrCreateBakedMeshScratch()
+        {
+            if (bakedMeshScratch != null)
+            {
+                return bakedMeshScratch;
+            }
+
+            bakedMeshScratch = new Mesh
+            {
+                name = nameof(DesktopPetBoundsService),
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            return bakedMeshScratch;
         }
 
         public bool TryGetWorldBounds(GameObject modelRoot, out Bounds bounds)

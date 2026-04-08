@@ -34,9 +34,33 @@ namespace VividSoul.Runtime.Animation
             new(HumanBodyBones.RightHand, new Vector3(0f, 4f, -6f)),
         };
 
+        private static readonly HumanBodyBones[] TrackedBones =
+        {
+            HumanBodyBones.Hips,
+            HumanBodyBones.Spine,
+            HumanBodyBones.Chest,
+            HumanBodyBones.UpperChest,
+            HumanBodyBones.Neck,
+            HumanBodyBones.Head,
+            HumanBodyBones.LeftShoulder,
+            HumanBodyBones.RightShoulder,
+            HumanBodyBones.LeftUpperArm,
+            HumanBodyBones.RightUpperArm,
+            HumanBodyBones.LeftLowerArm,
+            HumanBodyBones.RightLowerArm,
+            HumanBodyBones.LeftHand,
+            HumanBodyBones.RightHand,
+            HumanBodyBones.LeftUpperLeg,
+            HumanBodyBones.RightUpperLeg,
+            HumanBodyBones.LeftLowerLeg,
+            HumanBodyBones.RightLowerLeg,
+            HumanBodyBones.LeftFoot,
+            HumanBodyBones.RightFoot,
+        };
+
         [SerializeField] private bool enableRandomAmbientPoses = true;
-        [SerializeField] private float randomPoseIntervalMin = 6f;
-        [SerializeField] private float randomPoseIntervalMax = 14f;
+        [SerializeField] private float randomPoseIntervalMin = 20f;
+        [SerializeField] private float randomPoseIntervalMax = 40f;
         [SerializeField, Range(0f, 1f)] private float defaultPoseSampleNormalizedTime = 1f;
         [SerializeField] private float returnToDefaultDuration = 0.7f;
         [SerializeField] private float proceduralOffsetSmoothTime = 0.18f;
@@ -890,13 +914,8 @@ namespace VividSoul.Runtime.Animation
 
         private static IEnumerable<HumanBodyBones> EnumerateTrackedBones()
         {
-            foreach (HumanBodyBones bone in Enum.GetValues(typeof(HumanBodyBones)))
+            foreach (var bone in TrackedBones)
             {
-                if (bone == HumanBodyBones.LastBone)
-                {
-                    continue;
-                }
-
                 yield return bone;
             }
         }

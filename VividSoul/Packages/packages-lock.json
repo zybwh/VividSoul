@@ -1,5 +1,11 @@
 {
   "dependencies": {
+    "com.fairygui.gui": {
+      "version": "file:com.fairygui.gui",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {}
+    },
     "com.unity.ext.nunit": {
       "version": "2.0.5",
       "depth": 1,

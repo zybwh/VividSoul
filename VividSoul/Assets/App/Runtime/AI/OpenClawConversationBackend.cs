@@ -212,6 +212,16 @@ namespace VividSoul.Runtime.AI
             PublishStatus(ResolveConnectionState(), "已连接到 OpenClaw", isRequestInFlight);
         }
 
+        public void Tick(float unscaledTime)
+        {
+            _ = unscaledTime;
+        }
+
+        public void NotifyApplicationFocus(bool hasFocus)
+        {
+            _ = hasFocus;
+        }
+
         public void Dispose()
         {
             if (isDisposed)

@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using VividSoul.Runtime.Avatar;
 using VividSoul.Runtime.Content;
 using UnityEngine;
 
@@ -80,7 +81,12 @@ namespace VividSoul.Runtime.Settings
                 MonitorIndex: 0,
                 VoiceVolume: 1f,
                 HeadFollowEnabled: true,
-                HandFollowEnabled: true);
+                HandFollowEnabled: true,
+                CompactWindowEnabled: false,
+                HasWindowPosition: false,
+                WindowPositionX: 0f,
+                WindowPositionY: 0f,
+                VrmImportPerformanceMode: VrmImportPerformanceMode.Balanced);
         }
 
         private static DesktopPetSettingsData Normalize(DesktopPetSettingsData settings)
@@ -98,6 +104,7 @@ namespace VividSoul.Runtime.Settings
                 SelectedContent = selectedContent,
                 CachedModels = cachedModels,
                 IsClickThrough = false,
+                CompactWindowEnabled = false,
             };
         }
 
@@ -181,6 +188,11 @@ namespace VividSoul.Runtime.Settings
             public float voiceVolume = 1f;
             public bool headFollowEnabled = true;
             public bool handFollowEnabled = true;
+            public bool compactWindowEnabled;
+            public bool hasWindowPosition;
+            public float windowPositionX;
+            public float windowPositionY;
+            public int vrmImportPerformanceMode = (int)VrmImportPerformanceMode.Balanced;
 
             public DesktopPetSettingsData ToData()
             {
@@ -196,7 +208,14 @@ namespace VividSoul.Runtime.Settings
                     monitorIndex,
                     voiceVolume > 0f ? voiceVolume : 1f,
                     headFollowEnabled,
-                    handFollowEnabled);
+                    handFollowEnabled,
+                    compactWindowEnabled,
+                    hasWindowPosition,
+                    windowPositionX,
+                    windowPositionY,
+                    Enum.IsDefined(typeof(VrmImportPerformanceMode), vrmImportPerformanceMode)
+                        ? (VrmImportPerformanceMode)vrmImportPerformanceMode
+                        : VrmImportPerformanceMode.Balanced);
             }
 
             public static DesktopPetSettingsFile FromData(DesktopPetSettingsData data)
@@ -215,6 +234,11 @@ namespace VividSoul.Runtime.Settings
                     voiceVolume = data.VoiceVolume,
                     headFollowEnabled = data.HeadFollowEnabled,
                     handFollowEnabled = data.HandFollowEnabled,
+                    compactWindowEnabled = data.CompactWindowEnabled,
+                    hasWindowPosition = data.HasWindowPosition,
+                    windowPositionX = data.WindowPositionX,
+                    windowPositionY = data.WindowPositionY,
+                    vrmImportPerformanceMode = (int)data.VrmImportPerformanceMode,
                 };
             }
         }
