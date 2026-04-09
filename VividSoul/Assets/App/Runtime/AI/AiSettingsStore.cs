@@ -166,7 +166,25 @@ namespace VividSoul.Runtime.AI
                 OpenClawMirrorTranscriptLocally = profile.OpenClawMirrorTranscriptLocally,
                 OpenClawEnableBubbleForIncoming = profile.OpenClawEnableBubbleForIncoming,
                 OpenClawEnableTtsForIncoming = profile.OpenClawEnableTtsForIncoming,
+                MiniMaxTtsModel = NormalizeMiniMaxTtsModel(normalizedProviderType, profile.MiniMaxTtsModel),
+                MiniMaxTtsVoiceId = NormalizeMiniMaxTtsVoiceId(normalizedProviderType, profile.MiniMaxTtsVoiceId),
             };
+        }
+
+        private static string NormalizeMiniMaxTtsModel(LlmProviderType providerType, string value)
+        {
+            var normalized = value?.Trim() ?? string.Empty;
+            return providerType == LlmProviderType.MiniMax && string.IsNullOrWhiteSpace(normalized)
+                ? "speech-02-turbo"
+                : normalized;
+        }
+
+        private static string NormalizeMiniMaxTtsVoiceId(LlmProviderType providerType, string value)
+        {
+            var normalized = value?.Trim() ?? string.Empty;
+            return providerType == LlmProviderType.MiniMax && string.IsNullOrWhiteSpace(normalized)
+                ? "Chinese (Mandarin)_Soft_Girl"
+                : normalized;
         }
 
         private static LlmProviderType NormalizeProviderType(
@@ -260,6 +278,8 @@ namespace VividSoul.Runtime.AI
             public bool openClawMirrorTranscriptLocally = true;
             public bool openClawEnableBubbleForIncoming = true;
             public bool openClawEnableTtsForIncoming;
+            public string miniMaxTtsModel = string.Empty;
+            public string miniMaxTtsVoiceId = string.Empty;
 
             public LlmProviderProfile ToData()
             {
@@ -279,7 +299,9 @@ namespace VividSoul.Runtime.AI
                     OpenClawReceiveProactiveMessages: openClawReceiveProactiveMessages,
                     OpenClawMirrorTranscriptLocally: openClawMirrorTranscriptLocally,
                     OpenClawEnableBubbleForIncoming: openClawEnableBubbleForIncoming,
-                    OpenClawEnableTtsForIncoming: openClawEnableTtsForIncoming);
+                    OpenClawEnableTtsForIncoming: openClawEnableTtsForIncoming,
+                    MiniMaxTtsModel: miniMaxTtsModel ?? string.Empty,
+                    MiniMaxTtsVoiceId: miniMaxTtsVoiceId ?? string.Empty);
             }
 
             public static LlmProviderProfileFile FromData(LlmProviderProfile data)
@@ -302,6 +324,8 @@ namespace VividSoul.Runtime.AI
                     openClawMirrorTranscriptLocally = data.OpenClawMirrorTranscriptLocally,
                     openClawEnableBubbleForIncoming = data.OpenClawEnableBubbleForIncoming,
                     openClawEnableTtsForIncoming = data.OpenClawEnableTtsForIncoming,
+                    miniMaxTtsModel = data.MiniMaxTtsModel,
+                    miniMaxTtsVoiceId = data.MiniMaxTtsVoiceId,
                 };
             }
         }

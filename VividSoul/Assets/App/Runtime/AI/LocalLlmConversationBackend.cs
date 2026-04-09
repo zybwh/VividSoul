@@ -139,7 +139,8 @@ namespace VividSoul.Runtime.AI
                     ShouldDisplayBubble: true,
                     ShouldSpeak: response.ShouldSpeak,
                     IsOptimistic: false,
-                    ActionRequest: actionRequest));
+                    ActionRequest: actionRequest,
+                    SpeechText: response.TtsText));
             }
             finally
             {

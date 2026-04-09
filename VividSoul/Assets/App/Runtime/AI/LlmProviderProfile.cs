@@ -18,5 +18,7 @@ namespace VividSoul.Runtime.AI
         bool OpenClawReceiveProactiveMessages = true,
         bool OpenClawMirrorTranscriptLocally = true,
         bool OpenClawEnableBubbleForIncoming = true,
-        bool OpenClawEnableTtsForIncoming = false);
+        bool OpenClawEnableTtsForIncoming = false,
+        string MiniMaxTtsModel = "",
+        string MiniMaxTtsVoiceId = "");
 }

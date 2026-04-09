@@ -266,6 +266,8 @@ namespace VividSoul.Runtime.App
                 llmContent.ProviderBaseUrlInput,
                 llmContent.ProviderModelInput,
                 llmContent.ProviderApiKeyInput,
+                llmContent.ProviderTtsModelInput,
+                llmContent.ProviderTtsVoiceInput,
                 llmContent.SystemPromptInput,
                 llmContent.TemperatureInput,
                 llmContent.MaxOutputTokensInput,
@@ -449,6 +451,17 @@ namespace VividSoul.Runtime.App
                         ? "main"
                         : selectedProfile.OpenClawAgentId,
                 }
+                : nextType == LlmProviderType.MiniMax
+                    ? selectedProfile with
+                    {
+                        ProviderType = nextType,
+                        MiniMaxTtsModel = string.IsNullOrWhiteSpace(selectedProfile.MiniMaxTtsModel)
+                            ? "speech-02-turbo"
+                            : selectedProfile.MiniMaxTtsModel,
+                        MiniMaxTtsVoiceId = string.IsNullOrWhiteSpace(selectedProfile.MiniMaxTtsVoiceId)
+                            ? "Chinese (Mandarin)_Soft_Girl"
+                            : selectedProfile.MiniMaxTtsVoiceId,
+                    }
                 : selectedProfile with { ProviderType = nextType });
             ApplySelectedProviderToUi();
         }
@@ -546,6 +559,8 @@ namespace VividSoul.Runtime.App
                     BaseUrl = windowUi.ProviderBaseUrlInput.text.Trim(),
                     Model = windowUi.ProviderModelInput.text.Trim(),
                     Enabled = windowUi.ProviderEnabledToggle.isOn,
+                    MiniMaxTtsModel = windowUi.ProviderTtsModelInput.text.Trim(),
+                    MiniMaxTtsVoiceId = windowUi.ProviderTtsVoiceInput.text.Trim(),
                 };
             if (string.IsNullOrWhiteSpace(updatedProfile.DisplayName))
             {
@@ -612,6 +627,8 @@ namespace VividSoul.Runtime.App
                 ? selectedProfile.OpenClawAgentId
                 : selectedProfile.Model;
             windowUi.ProviderApiKeyInput.text = editingApiKeys.TryGetValue(selectedProfile.Id, out var apiKey) ? apiKey : string.Empty;
+            windowUi.ProviderTtsModelInput.text = selectedProfile.MiniMaxTtsModel;
+            windowUi.ProviderTtsVoiceInput.text = selectedProfile.MiniMaxTtsVoiceId;
             windowUi.ConfigurationStatusText.text = BuildConfigurationStatusText(selectedProfile);
             RebuildProviderButtons();
         }
@@ -1183,7 +1200,7 @@ namespace VividSoul.Runtime.App
             var scrollRoot = CreateScrollView(root.transform, out var content);
 
             var providerSection = CreateSectionCard(content, "ProviderSection", "Provider 配置");
-            SetPreferredHeight(providerSection, 430f);
+            SetPreferredHeight(providerSection, 540f);
             CreateHintText(providerSection, "管理当前激活的 Provider。保存仅代表本地配置生效。");
             var providerToolbar = CreateLayoutContainer(providerSection, "ProviderToolbar", isHorizontal: true, 8f, new RectOffset(0, 0, 0, 0), fitToContents: true);
             var providerToolbarLayout = providerToolbar.gameObject.AddComponent<LayoutElement>();
@@ -1204,6 +1221,10 @@ namespace VividSoul.Runtime.App
 
             var providerBaseUrlInput = CreateInputFieldSection(providerSection, "ProviderBaseUrl", "API URL", "例如 https://api.openai.com/v1", preferredHeight: StandardFieldHeight);
             var providerApiKeyInput = CreateInputFieldSection(providerSection, "ProviderApiKey", "API Key", "sk-...", preferredHeight: StandardFieldHeight, isPassword: true);
+            CreateHintText(providerSection, "MiniMax TTS 当前支持独立配置音色与语音模型；其他 Provider 暂不使用下面两个字段。");
+            var providerTtsRow = CreateTwoColumnRow(providerSection, "ProviderTtsRow");
+            var providerTtsModelInput = CreateInputFieldSection(providerTtsRow.LeftColumn, "ProviderTtsModel", "TTS 模型", "例如 speech-02-turbo", preferredHeight: StandardFieldHeight);
+            var providerTtsVoiceInput = CreateInputFieldSection(providerTtsRow.RightColumn, "ProviderTtsVoice", "TTS 音色 ID", "例如 Chinese (Mandarin)_Soft_Girl", preferredHeight: StandardFieldHeight);
 
             var providerTypeRow = CreateLayoutContainer(providerSection, "ProviderTypeRow", isHorizontal: true, 12f, new RectOffset(0, 0, 0, 0), fitToContents: true);
             var providerTypeInfo = CreateLayoutContainer(providerTypeRow, "ProviderTypeInfo", isHorizontal: true, 10f, new RectOffset(0, 0, 0, 0), fitToContents: true);
@@ -1235,7 +1256,7 @@ namespace VividSoul.Runtime.App
             var memoryRow = CreateTwoColumnRow(globalSection, "MemoryRow");
             var memoryWindowInput = CreateInputFieldSection(memoryRow.LeftColumn, "MemoryWindowTurns", "Recent Turns 保留轮数", "例如 12", preferredHeight: StandardFieldHeight);
             var summaryThresholdInput = CreateInputFieldSection(memoryRow.RightColumn, "SummaryThreshold", "摘要触发阈值", "例如 24", preferredHeight: StandardFieldHeight);
-            var enableTtsToggle = CreateToggleSection(globalSection, "EnableTts", "启用 TTS（当前仅框架预留）");
+            var enableTtsToggle = CreateToggleSection(globalSection, "EnableTts", "启用 TTS（当前支持 MiniMax）");
 
             var statsSection = CreateSectionCard(content, "StatsSection", "LLM 调用统计");
             SetPreferredHeight(statsSection, 230f);
@@ -1278,6 +1299,8 @@ namespace VividSoul.Runtime.App
                 providerBaseUrlInput,
                 providerModelInput,
                 providerApiKeyInput,
+                providerTtsModelInput,
+                providerTtsVoiceInput,
                 systemPromptInput,
                 temperatureInput,
                 maxOutputTokensInput,
@@ -2047,6 +2070,8 @@ namespace VividSoul.Runtime.App
                 InputField providerBaseUrlInput,
                 InputField providerModelInput,
                 InputField providerApiKeyInput,
+                InputField providerTtsModelInput,
+                InputField providerTtsVoiceInput,
                 InputField systemPromptInput,
                 InputField temperatureInput,
                 InputField maxOutputTokensInput,
@@ -2080,6 +2105,8 @@ namespace VividSoul.Runtime.App
                 ProviderBaseUrlInput = providerBaseUrlInput;
                 ProviderModelInput = providerModelInput;
                 ProviderApiKeyInput = providerApiKeyInput;
+                ProviderTtsModelInput = providerTtsModelInput;
+                ProviderTtsVoiceInput = providerTtsVoiceInput;
                 SystemPromptInput = systemPromptInput;
                 TemperatureInput = temperatureInput;
                 MaxOutputTokensInput = maxOutputTokensInput;
@@ -2130,6 +2157,10 @@ namespace VividSoul.Runtime.App
             public InputField ProviderModelInput { get; }
 
             public InputField ProviderApiKeyInput { get; }
+
+            public InputField ProviderTtsModelInput { get; }
+
+            public InputField ProviderTtsVoiceInput { get; }
 
             public InputField SystemPromptInput { get; }
 
@@ -2192,6 +2223,8 @@ namespace VividSoul.Runtime.App
                 InputField providerBaseUrlInput,
                 InputField providerModelInput,
                 InputField providerApiKeyInput,
+                InputField providerTtsModelInput,
+                InputField providerTtsVoiceInput,
                 InputField systemPromptInput,
                 InputField temperatureInput,
                 InputField maxOutputTokensInput,
@@ -2231,6 +2264,8 @@ namespace VividSoul.Runtime.App
                 ProviderBaseUrlInput = providerBaseUrlInput;
                 ProviderModelInput = providerModelInput;
                 ProviderApiKeyInput = providerApiKeyInput;
+                ProviderTtsModelInput = providerTtsModelInput;
+                ProviderTtsVoiceInput = providerTtsVoiceInput;
                 SystemPromptInput = systemPromptInput;
                 TemperatureInput = temperatureInput;
                 MaxOutputTokensInput = maxOutputTokensInput;
@@ -2297,6 +2332,10 @@ namespace VividSoul.Runtime.App
             public InputField ProviderModelInput { get; }
 
             public InputField ProviderApiKeyInput { get; }
+
+            public InputField ProviderTtsModelInput { get; }
+
+            public InputField ProviderTtsVoiceInput { get; }
 
             public InputField SystemPromptInput { get; }
 

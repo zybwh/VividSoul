@@ -55,6 +55,7 @@ namespace VividSoul.Runtime.App
         private DesktopPetChatOverlayPresenter? chatOverlayPresenter;
         private DesktopPetSettingsWindowPresenter? settingsWindowPresenter;
         private MateActionDispatcher? actionDispatcher;
+        private MateSpeechService? speechService;
         private float scheduledSubmenuCloseTime = float.PositiveInfinity;
         private float statusMessageHideAtTime = float.PositiveInfinity;
         private CanvasGroup? statusMessageCanvasGroup;
@@ -74,6 +75,7 @@ namespace VividSoul.Runtime.App
             runtimeController = GetComponent<DesktopPetRuntimeController>();
             speechBubblePresenter = new DesktopPetSpeechBubblePresenter(boundsService);
             actionDispatcher = new MateActionDispatcher(runtimeController);
+            speechService = new MateSpeechService(transform);
             chatOverlayPresenter = new DesktopPetChatOverlayPresenter(
                 ShowStatusMessage,
                 HandleChatMessageSubmitted,
@@ -139,6 +141,7 @@ namespace VividSoul.Runtime.App
             CloseContextMenus();
             HideStatusMessage();
             CancelChatRequest();
+            speechService?.Stop();
             speechBubblePresenter?.HideImmediate();
             chatOverlayPresenter?.Hide();
             settingsWindowPresenter?.Hide();
@@ -157,6 +160,8 @@ namespace VividSoul.Runtime.App
 
             CloseContextMenus();
             CancelChatRequest();
+            speechService?.Dispose();
+            speechService = null;
             speechBubblePresenter?.HideImmediate();
             chatOverlayPresenter?.Hide();
             settingsWindowPresenter?.Hide();
@@ -755,6 +760,14 @@ namespace VividSoul.Runtime.App
                             speechBubblePresenter?.Show(uiCanvas!, runtimeController, envelope.Message.Text);
                         }
 
+                        if (envelope.ShouldSpeak)
+                        {
+                            _ = PlayConversationSpeechAsync(
+                                string.IsNullOrWhiteSpace(envelope.SpeechText)
+                                ? envelope.Message.Text
+                                : envelope.SpeechText);
+                        }
+
                         if (chatOverlayPresenter.IsExpanded)
                         {
                             runtimeController.MarkConversationMessagesRead();
@@ -824,6 +837,27 @@ namespace VividSoul.Runtime.App
         private void AppendSystemMessageToChatPresenters(string message)
         {
             chatOverlayPresenter?.AppendSystemMessage(message);
+        }
+
+        private async System.Threading.Tasks.Task PlayConversationSpeechAsync(string text)
+        {
+            if (speechService == null)
+            {
+                return;
+            }
+
+            try
+            {
+                await speechService.SpeakAsync(text);
+            }
+            catch (UserFacingException exception)
+            {
+                pendingConversationUiActions.Enqueue(() => ShowStatusMessage(exception.Message));
+            }
+            catch (Exception exception)
+            {
+                pendingConversationUiActions.Enqueue(() => ShowStatusMessage($"TTS 播放失败：{exception.Message}"));
+            }
         }
 
         private void SetChatRequestInFlight(bool value)

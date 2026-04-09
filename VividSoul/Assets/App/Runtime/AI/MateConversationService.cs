@@ -206,7 +206,9 @@ namespace VividSoul.Runtime.AI
                 profile.OpenClawReceiveProactiveMessages.ToString(),
                 profile.OpenClawMirrorTranscriptLocally.ToString(),
                 profile.OpenClawEnableBubbleForIncoming.ToString(),
-                profile.OpenClawEnableTtsForIncoming.ToString());
+                profile.OpenClawEnableTtsForIncoming.ToString(),
+                profile.MiniMaxTtsModel,
+                profile.MiniMaxTtsVoiceId);
         }
     }
 }
